@@ -108,14 +108,25 @@ test("photo: lists every folder, without duplicates, skipping one that fails", a
   assert.deepEqual(await listImages(hass, ["a", "b"], true), ["a/1.jpg", "shared.jpg", "b/1.jpg", "b/sub/1.jpg"]);
   assert.deepEqual(await listImages(hass, ["gone", "a"], false), ["a/1.jpg", "shared.jpg"]);
   await assert.rejects(listImages(hass, ["gone", "also-gone"], false), /Path does not exist/);
+  tree.c = { children: [{ media_class: "directory", media_content_type: "", media_content_id: "c/broken", can_expand: true }] };
+  await assert.rejects(listImages(hass, ["a", "c"], true), /Path does not exist/);
+  assert.deepEqual(await listImages(hass, ["a", "c"], false), ["a/1.jpg", "shared.jpg"]);
 });
 
 test("editor: a list field shows as a list and saves one value as a plain string", () => {
   assert.deepEqual(toFormList({ media: "x", interval: 5 }, ["media"]), { media: ["x"], interval: 5 });
   assert.deepEqual(toFormList({ interval: 5 }, ["media"]), { interval: 5 });
   assert.deepEqual(fromFormList({ media: ["x"] }, ["media"]), { media: "x" });
-  assert.deepEqual(fromFormList({ media: ["x", "", "y"] }, ["media"]), { media: ["x", "y"] });
-  assert.deepEqual(fromFormList({ media: [""] }, ["media"]), {});
+  assert.deepEqual(fromFormList({ media: [] }, ["media"]), {});
+});
+
+test("editor: a row just added survives the setConfig round trip", () => {
+  for (const media of [[""], ["x", ""], ["x", "", "y"]]) {
+    const saved = fromFormList({ media }, ["media"]);
+    assert.deepEqual(saved, { media });
+    assert.deepEqual(toFormList(saved, ["media"]), { media });
+  }
+  assert.deepEqual(mediaFolders(["x", ""]), ["x"]);
 });
 
 test("photo: shuffle is a permutation", () => {
