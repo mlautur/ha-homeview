@@ -29,6 +29,63 @@ export class Resampler {
   }
 }
 
+/**
+ * End of speech, decided on the device. Home Assistant's own VAD ends a browser command after
+ * 0.7 s of silence and adds short pauses together, so it cuts people off mid-sentence; the card
+ * streams with `no_vad` and asks this instead, from the level of 20 ms frames at 16 kHz.
+ * `push` answers "listen", "end" (spoken, then `silence` seconds of quiet, or `max` reached)
+ * or "none" (nothing spoken within `noSpeech` seconds, or by `max`): don't transcribe noise.
+ */
+export class Endpointer {
+  heard = false;
+  private floor = 0.01; // room level: drops at once, rises over about two seconds
+  private sum = 0;
+  private n = 0;
+  private run = 0;
+  private quiet = 0;
+  private frames = 0;
+
+  // ponytail: energy against an adaptive floor, not a speech model; a loud TV keeps it listening
+  // until `max` (or a tap). Swap in a model VAD if that becomes the common case.
+  readonly silence: number;
+  readonly noSpeech: number;
+  readonly max: number;
+  constructor(silence = 1.2, noSpeech = 7, max = 15) {
+    this.silence = silence;
+    this.noSpeech = noSpeech;
+    this.max = max;
+  }
+
+  push(samples: Float32Array): "listen" | "end" | "none" {
+    for (const v of samples) {
+      this.sum += v * v;
+      if (++this.n < 320) continue;
+      this.frame(Math.sqrt(this.sum / this.n));
+      this.sum = 0;
+      this.n = 0;
+    }
+    const elapsed = this.frames / 50;
+    if (this.heard) return this.quiet >= this.silence - 1e-9 || elapsed >= this.max ? "end" : "listen";
+    return elapsed >= Math.min(this.noSpeech, this.max) ? "none" : "listen";
+  }
+
+  private frame(rms: number): void {
+    const dt = 0.02;
+    this.frames++;
+    if (rms > Math.max(this.floor * 3, 0.006)) {
+      this.run += dt;
+      if (this.run >= 0.1) {
+        this.heard = true;
+        this.quiet = 0;
+      }
+      return;
+    }
+    this.run = 0;
+    this.floor = rms < this.floor ? rms : this.floor + (rms - this.floor) * (dt / 2);
+    if (this.heard) this.quiet += dt;
+  }
+}
+
 /** Float [-1, 1] -> little-endian PCM16. */
 export function toPcm16(samples: Float32Array): Int16Array {
   const out = new Int16Array(samples.length);

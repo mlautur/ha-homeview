@@ -4,7 +4,7 @@ import { bendFromDepth, buildMap, glassParams, sdRoundedBox } from "../src/glass
 import { bake, boxBlur, boxRadius, crop, meanLuminance, scrimAlpha, type Pixels } from "../src/glass/bake.ts";
 import { backgroundRect } from "../src/glass/backdrop.ts";
 import { springAt, springEasing } from "../src/util/spring.ts";
-import { Resampler, audioFrame, toPcm16 } from "../src/util/audio.ts";
+import { Endpointer, Resampler, audioFrame, toPcm16 } from "../src/util/audio.ts";
 
 const px = (img: { width: number; data: Uint8ClampedArray }, x: number, y: number): number[] =>
   Array.from(img.data.slice((y * img.width + x) * 4, (y * img.width + x) * 4 + 4));
@@ -140,4 +140,25 @@ test("audio: 48 kHz -> 16 kHz, PCM16 clamps, frames carry the handler id", () =>
   assert.equal(f[0], 7);
   assert.equal(f.length, 9);
   assert.deepEqual(Array.from(audioFrame(3)), [3]);
+});
+
+test("audio: the voice card ends listening after a real pause, not a short one, and drops silence", () => {
+  const second = (level: number, seconds = 1) => Float32Array.from({ length: 16000 * seconds }, (_, i) => level * Math.sin(i / 3));
+  const feed = (ep: Endpointer, ...parts: Float32Array[]) => parts.map((p) => ep.push(p)).at(-1);
+  // room noise, speech, a 0.8 s mid-sentence pause, more speech: still listening
+  const ep = new Endpointer();
+  assert.equal(feed(ep, second(0.002), second(0.2), second(0.002, 0.8), second(0.2)), "listen");
+  assert.equal(ep.heard, true);
+  // then 1.2 s of quiet ends the command
+  assert.equal(feed(ep, second(0.002, 0.6)), "listen");
+  assert.equal(feed(ep, second(0.002, 0.7)), "end");
+  // nothing but room noise: give up without sending it to speech-to-text
+  const quiet = new Endpointer();
+  assert.equal(feed(quiet, ...Array.from({ length: 6 }, () => second(0.004))), "listen");
+  assert.equal(feed(quiet, second(0.004)), "none");
+  assert.equal(quiet.heard, false);
+  // a steady loud room never counts as quiet, so the cap ends it
+  const loud = new Endpointer();
+  assert.equal(feed(loud, second(0.2), ...Array.from({ length: 13 }, () => second(0.2))), "listen");
+  assert.equal(feed(loud, second(0.2)), "end");
 });

@@ -1,7 +1,8 @@
 // WebKit (Safari / iOS app engine) smoke check for dist/homeview.js at iPhone width.
 // Fails if the bundle does not load or define its cards in WebKit, if a card throws
-// while rendering, if the clock face is not round in a cell taller than it is wide, or if a
-// photo card in a hidden section browses the media server before it is shown.
+// while rendering, if the clock face is not round in a cell taller than it is wide, if a
+// photo card in a hidden section browses the media server before it is shown, or if a failed
+// Assist run spills out of the voice card, stretches its visualizer or does not clear on retry.
 // One-time setup: npx playwright-core install webkit. Run: npm run test:webkit
 import { readFileSync } from "node:fs";
 import { webkit } from "playwright-core";
@@ -72,6 +73,44 @@ const result = await page.evaluate(async () => {
   hidden.style.display = "block";
   await new Promise((r) => setTimeout(r, 300));
   out.shownBrowses = browses;
+
+  // a failed Assist run, in every cell shape the voice card allows: phone 12x3 / 6x3 / 6x6 / 12x6
+  const long = "Text-to-speech engine tts.example_text_to_speech does not support language en or options {'voice': 'dummy_voice_000000000000'}: Provider tts.example_text_to_speech not found";
+  let ok = false;
+  const voiceHass = { ...hass, connection: { subscribeMessage: async () => { if (ok) return () => {}; throw { code: "tts-not-supported", message: long }; } } };
+  out.voice = [];
+  for (const [w, h] of [[358, 184], [175, 184], [175, 376], [358, 376]]) {
+    ok = false;
+    const cell = document.body.appendChild(document.createElement("div"));
+    cell.style.cssText = `width:${w}px;height:${h}px;margin:8px`;
+    const el = document.createElement("homeview-voice-card");
+    el.setConfig({ grid_options: { rows: h > 300 ? 6 : 3 } });
+    el.hass = voiceHass;
+    cell.appendChild(el);
+    await el.updateComplete;
+    const q = (s) => el.shadowRoot.querySelector(s);
+    q(".kbd")?.click();
+    await el.updateComplete;
+    q("input[name=q]").value = "turn on the lights";
+    q("form.type").requestSubmit();
+    await new Promise((r) => setTimeout(r, 400));
+    const card = q("ha-card").getBoundingClientRect();
+    const sub = q(".sub");
+    const canvas = q("canvas.viz");
+    const spill = [".head", ".sub", ".orb", "canvas.viz", ".lines", ".kbd", ".type"].filter((s) => {
+      const e = q(s);
+      const b = e?.getBoundingClientRect();
+      return b && b.width && (b.left < card.left - 1 || b.top < card.top - 1 || b.right > card.right + 1 || b.bottom > card.bottom + 1);
+    });
+    const lines = Math.round(sub.getBoundingClientRect().height / parseFloat(getComputedStyle(sub).lineHeight));
+    const r = { w, h, status: sub.textContent, title: sub.title, spill, lines, css: canvas.clientWidth / canvas.clientHeight, buffer: canvas.width / canvas.height };
+    // try again: the next run clears the error
+    ok = true;
+    q(".orb").click();
+    await new Promise((r) => setTimeout(r, 200));
+    r.after = q(".sub").textContent;
+    out.voice.push(r);
+  }
   return out;
 });
 await browser.close();
@@ -84,9 +123,18 @@ if (result.hiddenBrowses !== 0) fail.push(`hidden photo card browsed media ${res
 if (result.shownBrowses !== 1) fail.push(`shown photo card browsed media ${result.shownBrowses} times, expected 1`);
 const clock = result.rendered.find((r) => r.tag === "homeview-clock-card");
 if (clock && Math.abs(clock.w - clock.h) > 1) fail.push(`clock face is ${clock.w}x${clock.h}, not round`);
+for (const v of result.voice) {
+  const at = `voice ${v.w}x${v.h} error`;
+  if (v.status !== "Couldn't speak the reply") fail.push(`${at}: status "${v.status}", expected the short message`);
+  if (!v.title.includes("not found")) fail.push(`${at}: full error not kept in the status tooltip`);
+  if (v.spill.length) fail.push(`${at}: ${v.spill.join(", ")} outside the card`);
+  if (v.lines > 2) fail.push(`${at}: status wraps to ${v.lines} lines`);
+  if (Math.abs(v.css / v.buffer - 1) > 0.02) fail.push(`${at}: visualizer drawn at ${v.buffer.toFixed(2)} for a ${v.css.toFixed(2)} box, not round`);
+  if (v.after === v.status) fail.push(`${at}: retry did not clear the error`);
+}
 console.log(JSON.stringify(result.rendered));
 if (fail.length) {
   console.error(`WebKit smoke FAILED:\n- ${fail.join("\n- ")}`);
   process.exit(1);
 }
-console.log("WebKit smoke passed: 5 cards defined and rendered, clock round, hidden photo card idle");
+console.log("WebKit smoke passed: 5 cards defined and rendered, clock round, hidden photo card idle, voice error contained and round");

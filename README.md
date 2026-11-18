@@ -136,7 +136,9 @@ Tap the orb to talk:
 - the visualizer follows your voice, then the spoken reply;
 - the card shows what was heard and the answer.
 
-Tap again to stop early. The keyboard button sends a typed request instead.
+The card stops listening after 1.2 seconds of quiet, so short pauses mid-sentence don't cut you off. If it hears nothing for 7 seconds, it shows "Didn't catch that" and sends nothing to speech-to-text, so the engine can't invent a sentence from room noise. Tap again to stop early. The keyboard button sends a typed request instead.
+
+When a run fails, the card shows a short reason ("Couldn't speak the reply", "Didn't catch that", ...). The orb becomes a retry button: it repeats a typed request, or listens again. **Details** shows Home Assistant's full error, which is also logged to the browser console.
 
 ### Voice needs HTTPS for the microphone
 
