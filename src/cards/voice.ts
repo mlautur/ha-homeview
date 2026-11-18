@@ -62,6 +62,8 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
   /** audio ended before Home Assistant handed out the stream id: send the end with the backlog */
   private audioDone = false;
   private unsub?: () => Promise<void>;
+  /** bumped on teardown, so a run whose subscription resolves later is dropped */
+  private runId = 0;
   private conversationId?: string;
   private audio?: HTMLAudioElement;
   private speaking = false;
@@ -130,7 +132,7 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
   // ---------- pipeline ----------
 
   private async talk(): Promise<void> {
-    if (this._phase === "listening") return this.endpointer?.heard ? this.endAudio() : this.noSpeech();
+    if (this._phase === "listening") return this.endAudio();
     if (this._phase === "thinking" || this._phase === "responding") return;
     if (this.micBlocked()) {
       this._typing = true;
@@ -193,12 +195,15 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
 
   private async run(msg: Record<string, unknown>): Promise<void> {
     const c = this._config!;
-    this.unsub = await this.hass!.connection.subscribeMessage<PipelineEvent>((ev) => this.onEvent(ev), {
+    const id = ++this.runId;
+    const unsub = await this.hass!.connection.subscribeMessage<PipelineEvent>((ev) => id === this.runId && this.onEvent(ev), {
       type: "assist_pipeline/run",
       ...msg,
       ...(c.pipeline ? { pipeline: c.pipeline } : {}),
       ...(this.conversationId ? { conversation_id: this.conversationId } : {}),
     });
+    if (id === this.runId) this.unsub = unsub;
+    else await unsub().catch(() => undefined);
   }
 
   private onEvent(ev: PipelineEvent): void {
@@ -326,6 +331,7 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
   }
 
   private async teardown(): Promise<void> {
+    this.runId++;
     clearTimeout(this.stopTimer);
     await this.stopMic();
     await this.unsub?.().catch(() => undefined);
