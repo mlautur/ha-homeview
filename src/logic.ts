@@ -94,19 +94,61 @@ export function nowIn(timeZone?: string, d = new Date()): { h: number; m: number
   return { h: get("hour"), m: get("minute"), s: get("second"), ms: d.getMilliseconds() };
 }
 
-export async function listImages(hass: Pick<Hass, "callWS">, root: string, recursive: boolean): Promise<string[]> {
-  const out: string[] = [];
-  const queue: Array<[string, number]> = [[root, 0]];
-  while (queue.length && out.length < MAX_ITEMS) {
+/** The photo card's `media`: one folder or a list of folders. */
+export function mediaFolders(media: unknown): string[] {
+  const list = Array.isArray(media) ? media : [media];
+  return list.filter((m): m is string => typeof m === "string").map((m) => m.trim()).filter(Boolean);
+}
+
+/**
+ * Image ids under one or more media-source folders, breadth first across all of them.
+ * A top-level folder that cannot be opened is skipped; the error is thrown only when none can be.
+ */
+export async function listImages(hass: Pick<Hass, "callWS">, roots: string | string[], recursive: boolean): Promise<string[]> {
+  const out = new Set<string>();
+  const queue: Array<[string, number]> = mediaFolders(roots).map((r) => [r, 0]);
+  let opened = 0;
+  let firstError: unknown;
+  while (queue.length && out.size < MAX_ITEMS) {
     const [id, depth] = queue.shift()!;
-    const node = await hass.callWS<BrowseItem>({ type: "media_source/browse_media", media_content_id: id });
+    let node: BrowseItem;
+    try {
+      node = await hass.callWS<BrowseItem>({ type: "media_source/browse_media", media_content_id: id });
+    } catch (e) {
+      if (depth > 0) throw e;
+      firstError ??= e;
+      continue;
+    }
+    if (depth === 0) opened++;
     for (const child of node.children ?? []) {
-      if (isImage(child)) out.push(child.media_content_id);
+      if (isImage(child)) out.add(child.media_content_id);
       else if (recursive && child.can_expand && depth < 3) queue.push([child.media_content_id, depth + 1]);
-      if (out.length >= MAX_ITEMS) break;
+      if (out.size >= MAX_ITEMS) break;
     }
   }
-  return out;
+  if (!opened && firstError) throw firstError;
+  return [...out];
+}
+
+/** Visual editor: show list fields (e.g. the photo card's media) as lists... */
+export function toFormList<T extends Record<string, unknown>>(config: T, names: string[]): T {
+  const data: Record<string, unknown> = { ...config };
+  for (const n of names) if (n in data && !Array.isArray(data[n])) data[n] = mediaFolders(data[n]);
+  return data as T;
+}
+
+/** ...and save them back as a plain string when there is only one value; a list with blank rows is kept as entered. */
+export function fromFormList<T extends Record<string, unknown>>(data: T, names: string[]): T {
+  const config: Record<string, unknown> = { ...data };
+  for (const n of names) {
+    if (!(n in config)) continue;
+    const raw = config[n];
+    if (Array.isArray(raw) && raw.some((m) => typeof m !== "string" || !m.trim())) continue;
+    const list = mediaFolders(raw);
+    if (!list.length) delete config[n];
+    else config[n] = list.length === 1 ? list[0] : list;
+  }
+  return config as T;
 }
 
 export function shuffled<T>(a: T[], rnd = Math.random): T[] {

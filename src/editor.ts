@@ -6,6 +6,7 @@
  */
 import { LitElement, html, nothing } from "lit";
 import { fireEvent, type Hass, type LovelaceCardConfig } from "./ha.ts";
+import { fromFormList, toFormList } from "./logic.ts";
 
 export interface EditorField {
   name: string;
@@ -14,6 +15,8 @@ export interface EditorField {
   required?: boolean;
   selector?: Record<string, unknown>;
   type?: string;
+  /** a value that may be one string or a list of strings (text selector with multiple) */
+  list?: boolean;
   flatten?: boolean;
   title?: string;
   schema?: EditorField[];
@@ -77,7 +80,7 @@ export class HomeViewCardEditor extends LitElement {
     if (!this.hass || !this._config) return nothing;
     return html`<ha-form
       .hass=${this.hass}
-      .data=${this._config}
+      .data=${toFormList(this._config, this.listNames())}
       .schema=${[...this.fields, ...GLASS_FIELDS]}
       .computeLabel=${(s: EditorField) => s.label ?? labelize(s.name)}
       .computeHelper=${(s: EditorField) => s.helper}
@@ -85,9 +88,13 @@ export class HomeViewCardEditor extends LitElement {
     ></ha-form>`;
   }
 
+  private listNames(): string[] {
+    return this.fields.filter((f) => f.list).map((f) => f.name);
+  }
+
   private changed(ev: CustomEvent<{ value: LovelaceCardConfig }>): void {
     ev.stopPropagation();
-    const config: LovelaceCardConfig = { ...ev.detail.value };
+    const config: LovelaceCardConfig = fromFormList({ ...ev.detail.value }, this.listNames());
     for (const [k, v] of Object.entries(config)) if (v === "" || v === undefined || v === null) delete config[k];
     fireEvent(this, "config-changed", { config });
   }

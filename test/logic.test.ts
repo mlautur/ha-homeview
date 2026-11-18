@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  clampStep, defaultSide, handAngles, isActive, listImages, nowIn, phaseAfter, satellitePhase, setpoints, shuffled, tapService,
+  clampStep, defaultSide, fromFormList, handAngles, isActive, listImages, mediaFolders, nowIn, phaseAfter, satellitePhase, setpoints, shuffled, tapService, toFormList,
 } from "../src/logic.ts";
 
 const climate = (attributes: Record<string, unknown>, state = "heat") => ({ entity_id: "climate.x", state, attributes });
@@ -82,6 +82,51 @@ test("photo: a large first folder does not hide the later ones", async () => {
   const ids = await listImages(hass, "root", true);
   assert.equal(ids.length, 1501);
   assert.ok(ids.includes("later/x.jpg"));
+});
+
+test("photo: media is one folder or a list of folders", () => {
+  assert.deepEqual(mediaFolders("media-source://a"), ["media-source://a"]);
+  assert.deepEqual(mediaFolders(["media-source://a", " media-source://b ", ""]), ["media-source://a", "media-source://b"]);
+  assert.deepEqual(mediaFolders(undefined), []);
+  assert.deepEqual(mediaFolders([]), []);
+});
+
+test("photo: lists every folder, without duplicates, skipping one that fails", async () => {
+  const img = (id: string) => ({ media_class: "image", media_content_type: "image/jpeg", media_content_id: id, can_expand: false });
+  const tree: Record<string, { children: object[] }> = {
+    a: { children: [img("a/1.jpg"), img("shared.jpg")] },
+    b: { children: [img("b/1.jpg"), img("shared.jpg"), { media_class: "directory", media_content_type: "", media_content_id: "b/sub", can_expand: true }] },
+    "b/sub": { children: [img("b/sub/1.jpg")] },
+  };
+  const hass = {
+    callWS: async <T>(m: Record<string, unknown>) => {
+      const node = tree[m.media_content_id as string];
+      if (!node) throw new Error("Path does not exist.");
+      return node as T;
+    },
+  };
+  assert.deepEqual(await listImages(hass, ["a", "b"], true), ["a/1.jpg", "shared.jpg", "b/1.jpg", "b/sub/1.jpg"]);
+  assert.deepEqual(await listImages(hass, ["gone", "a"], false), ["a/1.jpg", "shared.jpg"]);
+  await assert.rejects(listImages(hass, ["gone", "also-gone"], false), /Path does not exist/);
+  tree.c = { children: [{ media_class: "directory", media_content_type: "", media_content_id: "c/broken", can_expand: true }] };
+  await assert.rejects(listImages(hass, ["a", "c"], true), /Path does not exist/);
+  assert.deepEqual(await listImages(hass, ["a", "c"], false), ["a/1.jpg", "shared.jpg"]);
+});
+
+test("editor: a list field shows as a list and saves one value as a plain string", () => {
+  assert.deepEqual(toFormList({ media: "x", interval: 5 }, ["media"]), { media: ["x"], interval: 5 });
+  assert.deepEqual(toFormList({ interval: 5 }, ["media"]), { interval: 5 });
+  assert.deepEqual(fromFormList({ media: ["x"] }, ["media"]), { media: "x" });
+  assert.deepEqual(fromFormList({ media: [] }, ["media"]), {});
+});
+
+test("editor: a row just added survives the setConfig round trip", () => {
+  for (const media of [[""], ["x", ""], ["x", "", "y"]]) {
+    const saved = fromFormList({ media }, ["media"]);
+    assert.deepEqual(saved, { media });
+    assert.deepEqual(toFormList(saved, ["media"]), { media });
+  }
+  assert.deepEqual(mediaFolders(["x", ""]), ["x"]);
 });
 
 test("photo: shuffle is a permutation", () => {
