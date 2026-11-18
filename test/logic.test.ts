@@ -70,6 +70,20 @@ test("photo: lists images, recurses into folders only when asked", async () => {
   assert.deepEqual(await listImages(hass, "root", true), ["a.jpg", "b.png"]);
 });
 
+test("photo: a large first folder does not hide the later ones", async () => {
+  const img = (id: string) => ({ media_class: "image", media_content_type: "image/jpeg", media_content_id: id, can_expand: false });
+  const dir = (id: string) => ({ media_class: "directory", media_content_type: "", media_content_id: id, can_expand: true });
+  const tree: Record<string, { children: object[] }> = {
+    root: { children: [dir("big"), dir("later")] },
+    big: { children: Array.from({ length: 1500 }, (_, i) => img(`big/${i}.jpg`)) },
+    later: { children: [img("later/x.jpg")] },
+  };
+  const hass = { callWS: async <T>(m: Record<string, unknown>) => tree[m.media_content_id as string] as T };
+  const ids = await listImages(hass, "root", true);
+  assert.equal(ids.length, 1501);
+  assert.ok(ids.includes("later/x.jpg"));
+});
+
 test("photo: shuffle is a permutation", () => {
   let seed = 1;
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);

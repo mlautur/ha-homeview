@@ -84,10 +84,11 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
     else if (s.state === "unavailable") sub = "Unavailable";
     else if (this._confirming) sub = "Tap again to unlock";
     else if (domain === "lock" && ["locking", "unlocking", "jammed", "opening", "open"].includes(s.state)) sub = s.state[0].toUpperCase() + s.state.slice(1);
-    const stateText = s ? (domain === "lock" ? s.state : on ? "on" : "off") : "missing";
+    // locks and covers read their own state (locked, open, closing...); scenes and scripts have none worth reading
+    const stateText = !s ? "missing" : domain === "lock" || domain === "cover" ? s.state : domain === "scene" || domain === "script" ? "" : on ? "on" : "off";
     return html`<button
       class="hit"
-      aria-label="${name}, ${sub}, ${stateText}"
+      aria-label="${[name, sub, stateText].filter(Boolean).join(", ")}"
       aria-pressed=${domain === "scene" || domain === "script" ? nothing : String(on)}
       ?disabled=${!s || s.state === "unavailable"}
       @pointerdown=${this.down}

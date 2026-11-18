@@ -192,6 +192,14 @@ export abstract class HomeViewCard<C extends BaseConfig = BaseConfig> extends Li
 
   protected abstract renderContent(): TemplateResult | typeof nothing;
 
+  /** false while the card or an ancestor is display:none, e.g. a section hidden by a screen condition */
+  protected get onScreen(): boolean {
+    return this.getClientRects().length > 0;
+  }
+
+  /** the card has a size again: restart work paused while hidden (must be idempotent) */
+  protected resume(): void {}
+
   protected cardClass(): string {
     return "";
   }
@@ -214,6 +222,7 @@ export abstract class HomeViewCard<C extends BaseConfig = BaseConfig> extends Li
       card.style.setProperty("--hv-radius", `${Math.round(Math.max(14, Math.min(34, ref * 0.125)))}px`);
       card.toggleAttribute("data-wide", card.offsetWidth > card.offsetHeight * 1.5);
       this.glass.request(true); // radius depends on size: bake with the final shape
+      if (card.offsetWidth) this.resume();
     });
     this.sizer.observe(card);
   }

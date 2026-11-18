@@ -13,7 +13,9 @@ export interface BrowseItem {
   children?: BrowseItem[];
 }
 
-const MAX_ITEMS = 500;
+// ponytail: ids are short strings, so keep a whole family library (tens of thousands);
+// a cap that small would only ever reach the first folders. Sample per folder if libraries outgrow it.
+const MAX_ITEMS = 50000;
 
 export const isImage = (i: BrowseItem): boolean => i.media_class === "image" || !!i.media_content_type?.startsWith("image/");
 
