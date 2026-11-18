@@ -1,6 +1,6 @@
 {
   "name": "ha-homeview",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "HomeView liquid-glass card pack for Home Assistant",
   "private": true,
   "type": "module",
