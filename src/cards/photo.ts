@@ -193,6 +193,7 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
         place-items: center;
         padding: 12%;
         text-align: center;
+        overflow-wrap: anywhere;
         color: #fff;
         font-family: var(--hv-font);
         font-size: calc(var(--hv-ref, 200px) * 0.075);
