@@ -182,6 +182,7 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
 
   private async ask(text: string): Promise<void> {
     if (!text.trim()) return;
+    await this.teardown();
     this.reset();
     this.lastText = text;
     this._heard = text;
