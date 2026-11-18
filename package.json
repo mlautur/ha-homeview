@@ -1,0 +1,23 @@
+{
+  "name": "ha-homeview",
+  "version": "0.1.0",
+  "description": "HomeView liquid-glass card pack for Home Assistant",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/*.test.ts\"",
+    "check": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "lit": "3.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.9",
+    "esbuild": "0.27.0",
+    "typescript": "5.9.3"
+  },
+  "license": "MIT"
+}

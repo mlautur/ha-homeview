@@ -1,0 +1,277 @@
+/**
+ * HomeView tile: light, switch, fan, lock, cover, scene, script (and
+ * input_boolean). Tap runs the domain action, hold opens more-info.
+ */
+import { css, html, nothing, type TemplateResult } from "lit";
+import { HomeViewCard, glassStyles, type BaseConfig } from "./base.ts";
+import { areaName, domainOf, fireEvent, friendlyName, isUnavailable, registerCard, type GridOptions, type Hass } from "../ha.ts";
+import { iconFor } from "../icons.ts";
+import type { EditorField } from "../editor.ts";
+import { isActive, tapService } from "../logic.ts";
+
+export const TILE_DOMAINS = ["light", "switch", "fan", "lock", "cover", "scene", "script", "input_boolean"];
+
+export interface TileConfig extends BaseConfig {
+  entity: string;
+  name?: string;
+  subtitle?: string;
+  icon?: string;
+  tap_action?: "toggle" | "more-info" | "none";
+  confirm_unlock?: boolean;
+}
+
+/** Whether the entity is in its highlighted ("on") state. Locks highlight when NOT locked. */
+
+/** The service call a tap performs, or null when nothing should happen. */
+
+const HOLD_MS = 500;
+
+export class HomeViewTileCard extends HomeViewCard<TileConfig> {
+  static properties = { ...HomeViewCard.properties, _confirming: { state: true }, _flash: { state: true } };
+  private _confirming = false;
+  private _flash = false;
+  private holdTimer = 0;
+  private held = false;
+  private confirmTimer = 0;
+
+  static editorFields: EditorField[] = [
+    { name: "entity", required: true, selector: { entity: { filter: { domain: TILE_DOMAINS } } } },
+    { name: "name", selector: { text: {} } },
+    { name: "subtitle", helper: "Defaults to the entity's area", selector: { text: {} } },
+    { name: "icon", helper: "Optional mdi: icon; HomeView glyphs are used by default", selector: { icon: {} } },
+    {
+      name: "tap_action",
+      label: "Tap action",
+      selector: { select: { mode: "dropdown", options: [{ value: "toggle", label: "Toggle / run" }, { value: "more-info", label: "More info" }, { value: "none", label: "Nothing" }] } },
+    },
+    { name: "confirm_unlock", label: "Confirm before unlocking (locks)", selector: { boolean: {} } },
+  ];
+
+  static getStubConfig(hass: Hass): Partial<TileConfig> {
+    const pick = Object.keys(hass.states).find((e) => domainOf(e) === "light") ?? Object.keys(hass.states).find((e) => TILE_DOMAINS.includes(domainOf(e)));
+    return { entity: pick ?? "" };
+  }
+
+  protected validate(config: TileConfig): void {
+    if (!config.entity) throw new Error("Pick an entity");
+  }
+
+  getGridOptions(): GridOptions {
+    return { columns: 4, rows: "auto", min_columns: 3, min_rows: 2 };
+  }
+
+  getCardSize(): number {
+    return 3;
+  }
+
+  protected cardClass(): string {
+    const c = this._config!;
+    const s = this.hass?.states[c.entity];
+    const domain = domainOf(c.entity);
+    const on = s && !isUnavailable(s) && isActive(domain, s.state);
+    return `tile ${domain} ${on || this._flash ? "on" : ""} ${isUnavailable(s) ? "unavailable" : ""} ${this._confirming ? "confirming" : ""}`;
+  }
+
+  protected renderContent(): TemplateResult | typeof nothing {
+    const c = this._config!;
+    if (!this.hass) return nothing;
+    const s = this.hass.states[c.entity];
+    const domain = domainOf(c.entity);
+    const on = !!s && !isUnavailable(s) && isActive(domain, s.state);
+    const name = c.name ?? (s ? friendlyName(this.hass, c.entity) : c.entity);
+    let sub = c.subtitle ?? areaName(this.hass, c.entity) ?? "";
+    if (!s) sub = "Entity not found";
+    else if (s.state === "unavailable") sub = "Unavailable";
+    else if (this._confirming) sub = "Tap again to unlock";
+    else if (domain === "lock" && ["locking", "unlocking", "jammed", "opening", "open"].includes(s.state)) sub = s.state[0].toUpperCase() + s.state.slice(1);
+    const stateText = s ? (domain === "lock" ? s.state : on ? "on" : "off") : "missing";
+    return html`<button
+      class="hit"
+      aria-label="${name}, ${sub}, ${stateText}"
+      aria-pressed=${domain === "scene" || domain === "script" ? nothing : String(on)}
+      ?disabled=${!s || s.state === "unavailable"}
+      @pointerdown=${this.down}
+      @pointerup=${this.up}
+      @pointerleave=${this.cancel}
+      @pointercancel=${this.cancel}
+      @click=${this.onTap}
+      @contextmenu=${(e: Event) => e.preventDefault()}
+    >
+      <span class="icon">${c.icon ? html`<ha-icon .icon=${c.icon}></ha-icon>` : iconFor(domain, s?.attributes.device_class, on)}</span>
+      <span class="label ink"><span class="title">${name}</span><br /><span class="sub">${sub}</span></span>
+    </button>`;
+  }
+
+  private down = (): void => {
+    this.held = false;
+    clearTimeout(this.holdTimer);
+    this.holdTimer = window.setTimeout(() => {
+      this.held = true;
+      fireEvent(this, "hass-more-info", { entityId: this._config!.entity });
+    }, HOLD_MS);
+  };
+
+  private up = (): void => clearTimeout(this.holdTimer);
+  private cancel = (): void => clearTimeout(this.holdTimer);
+
+  private onTap = (): void => {
+    if (this.held) {
+      this.held = false;
+      return;
+    }
+    const c = this._config!;
+    const action = c.tap_action ?? "toggle";
+    if (action === "none" || !this.hass) return;
+    if (action === "more-info") {
+      fireEvent(this, "hass-more-info", { entityId: c.entity });
+      return;
+    }
+    const s = this.hass.states[c.entity];
+    if (!s) return;
+    const domain = domainOf(c.entity);
+    if (domain === "lock" && s.state === "locked" && c.confirm_unlock && !this._confirming) {
+      this._confirming = true;
+      clearTimeout(this.confirmTimer);
+      this.confirmTimer = window.setTimeout(() => (this._confirming = false), 3000);
+      return;
+    }
+    this._confirming = false;
+    const svc = tapService(domain, s.state);
+    if (!svc) return;
+    if (domain === "scene") {
+      this._flash = true;
+      setTimeout(() => (this._flash = false), 1200);
+    }
+    void this.hass.callService(svc[0], svc[1], {}, { entity_id: c.entity });
+  };
+
+  static styles = [
+    glassStyles,
+    css`
+      .hit {
+        appearance: none;
+        border: 0;
+        background: none;
+        padding: 0;
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: calc(var(--hv-ref) * 0.07);
+        text-align: center;
+        border-radius: inherit;
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      .hit:disabled {
+        cursor: default;
+        opacity: 0.55;
+      }
+      ha-card.tile {
+        transition: transform 0.45s var(--hv-spring), box-shadow 0.35s ease;
+      }
+      ha-card.tile:active {
+        transform: scale(0.94);
+        transition-duration: 0.12s;
+      }
+      .icon {
+        width: calc(var(--hv-ref) * 0.31);
+        height: calc(var(--hv-ref) * 0.31);
+        display: grid;
+        place-items: center;
+        --mdc-icon-size: calc(var(--hv-ref) * 0.27);
+      }
+      .icon svg {
+        width: 100%;
+        height: 100%;
+        display: block;
+        filter: drop-shadow(var(--hv-shadow-text));
+        transition: color 0.35s ease, filter 0.35s ease;
+      }
+      .label {
+        padding: 0 6px;
+        max-width: 100%;
+        overflow: hidden;
+      }
+      .label .title,
+      .label .sub {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: inline-block;
+        max-width: 100%;
+      }
+      /* active: warm-white glass, dark ink (Apple Home "on" convention) */
+      ha-card.on {
+        --hv-fill: rgb(255 255 255 / 0.8);
+      }
+      ha-card.on .label {
+        text-shadow: none;
+        color: #2b241d;
+      }
+      ha-card.on .label .sub {
+        color: rgb(43 36 29 / 0.62);
+      }
+      ha-card.on .icon svg {
+        filter: none;
+      }
+      ha-card.light.on {
+        --hv-fill: rgb(255 246 226 / 0.82);
+        box-shadow:
+          0 0 calc(var(--hv-ref) * 0.25) rgb(255 196 90 / 0.55),
+          0 calc(var(--hv-ref) * 0.03) calc(var(--hv-ref) * 0.09) rgb(60 45 30 / 0.14);
+      }
+      ha-card.light.on .icon {
+        color: #f2a524;
+      }
+      ha-card.light.on .icon svg {
+        filter: drop-shadow(0 0 calc(var(--hv-ref) * 0.05) rgb(255 190 70 / 0.9));
+      }
+      ha-card.lock.on {
+        --hv-fill: rgb(255 240 225 / 0.8);
+      }
+      ha-card.lock.on .icon {
+        color: #e8792b;
+      }
+      ha-card.confirming .icon {
+        color: #ffb27a;
+      }
+      ha-card.confirming .sub {
+        color: #fff;
+        font-weight: 600;
+      }
+      ha-card.fan.on .icon {
+        color: #2f9d8f;
+      }
+      ha-card.fan.on .blades {
+        animation: spin 1.1s linear infinite;
+        transform-origin: 12px 10px;
+      }
+      ha-card.cover.on .icon {
+        color: #3478f6;
+      }
+      ha-card.scene.on .icon,
+      ha-card.script.on .icon {
+        color: #6e66d6;
+      }
+      ha-card.switch.on .icon,
+      ha-card.input_boolean.on .icon {
+        color: #f2a524;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    `,
+  ];
+}
+
+customElements.define("homeview-tile-card", HomeViewTileCard);
+registerCard("homeview-tile-card", "HomeView Tile", "Liquid-glass tile for lights, switches, fans, locks, covers, scenes and scripts.");

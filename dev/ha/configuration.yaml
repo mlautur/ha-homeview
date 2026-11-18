@@ -1,0 +1,50 @@
+# Local Home Assistant used to verify the HomeView card pack end to end.
+# Demo entities cover climate (single + heat_cool), lights, fan, locks, covers,
+# a demo STT/TTS pair for the Assist pipeline, plus a local media folder.
+default_config:
+
+demo:
+
+homeassistant:
+  name: HomeView Dev
+  unit_system: us_customary
+  time_zone: UTC
+  media_dirs:
+    local: /media
+
+scene:
+  - name: Morning Routine
+    icon: mdi:weather-sunny
+    entities:
+      light.ceiling_lights:
+        state: "on"
+        brightness: 200
+      light.kitchen_lights: "on"
+
+script:
+  good_night:
+    alias: Good Night
+    sequence:
+      - action: light.turn_off
+        target:
+          entity_id: all
+
+input_boolean:
+  porch_lamp:
+    name: Porch Lamp
+
+template:
+  - switch:
+      - name: Porch Switch
+        unique_id: homeview_dev_porch_switch
+        state: "{{ is_state('input_boolean.porch_lamp', 'on') }}"
+        turn_on:
+          action: input_boolean.turn_on
+          target:
+            entity_id: input_boolean.porch_lamp
+        turn_off:
+          action: input_boolean.turn_off
+          target:
+            entity_id: input_boolean.porch_lamp
+
+homeview_test_stt:

@@ -1,0 +1,11 @@
+node_modules/
+dev/ha/config/.storage/
+dev/ha/config/*.db*
+dev/ha/config/*.log*
+dev/ha/config/.HA_VERSION
+dev/ha/config/.cloud/
+dev/ha/config/deps/
+dev/ha/config/tts/
+dev/ha/config/.ha_run.lock
+dev/ha/config/www/homeview.js
+.DS_Store
