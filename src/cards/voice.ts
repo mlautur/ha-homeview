@@ -312,7 +312,7 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
     const k = Math.min(window.devicePixelRatio || 1, 2);
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
-    if (!w || !h) return true;
+    if (!w || !h) return false; // hidden or not laid out yet: resume() restarts
     if (canvas.width !== Math.round(w * k)) {
       canvas.width = Math.round(w * k);
       canvas.height = Math.round(h * k);
@@ -422,6 +422,10 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
     void this.ask(input.value);
     input.value = "";
   };
+
+  protected resume(): void {
+    if (!this.raf && this.isConnected) this.loop();
+  }
 
   protected updated(changed: PropertyValues): void {
     super.updated?.(changed);

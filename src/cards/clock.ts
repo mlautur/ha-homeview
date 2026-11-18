@@ -1,5 +1,5 @@
 /** HomeView analog clock on a circular glass face. */
-import { css, html, svg, type TemplateResult } from "lit";
+import { css, html, svg, type PropertyValues, type TemplateResult } from "lit";
 import { HomeViewCard, glassStyles, type BaseConfig } from "./base.ts";
 import { registerCard, type GridOptions } from "../ha.ts";
 import type { EditorField } from "../editor.ts";
@@ -17,6 +17,7 @@ export interface ClockConfig extends BaseConfig {
 export class HomeViewClockCard extends HomeViewCard<ClockConfig> {
   private raf = 0;
   private timer = 0;
+  private fit?: ResizeObserver;
 
   static editorFields: EditorField[] = [
     {
@@ -62,6 +63,29 @@ export class HomeViewClockCard extends HomeViewCard<ClockConfig> {
     super.disconnectedCallback();
     cancelAnimationFrame(this.raf);
     clearTimeout(this.timer);
+    this.fit?.disconnect();
+    this.fit = undefined;
+  }
+
+  protected firstUpdated(changed: PropertyValues): void {
+    super.firstUpdated(changed);
+    this.fit ??= new ResizeObserver(() => this.fitFace());
+    this.fit.observe(this);
+  }
+
+  /** A fixed Sections cell can be wider or taller than it is high: keep a true circle, centred. */
+  private fitFace(): void {
+    const card = this.renderRoot.querySelector<HTMLElement>("ha-card");
+    if (!card) return;
+    const w = this.clientWidth;
+    const h = this.clientHeight;
+    const s = this.square || !w || !h ? 0 : Math.min(w, h);
+    card.style.width = card.style.height = s ? `${s}px` : "";
+    card.style.margin = s ? `${(h - s) / 2}px auto 0` : "";
+  }
+
+  protected resume(): void {
+    if (!this.raf && !this.timer) this.loop();
   }
 
   private mode(): "sweep" | "tick" | "off" {
@@ -70,6 +94,8 @@ export class HomeViewClockCard extends HomeViewCard<ClockConfig> {
   }
 
   private loop = (): void => {
+    this.raf = this.timer = 0;
+    if (!this.onScreen) return; // hidden: resume() restarts the hands
     this.draw();
     const m = this.mode();
     if (m === "sweep") this.raf = requestAnimationFrame(this.loop);
@@ -110,12 +136,6 @@ export class HomeViewClockCard extends HomeViewCard<ClockConfig> {
       ha-card.hv-glass.clock {
         border-radius: 50%;
         aspect-ratio: 1;
-      }
-      /* fixed-size cell (Sections rows set): keep a true circle, centred */
-      ha-card.hv-glass.clock:not(.square) {
-        width: auto;
-        max-width: 100%;
-        margin: 0 auto;
       }
       .face {
         position: absolute;

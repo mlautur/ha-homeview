@@ -27,6 +27,8 @@ Each card has a **Glass and wallpaper** group in the visual editor.
 
 HACS registers the resource for you.
 
+Reload every Home Assistant window that was already open, including the companion apps (pull down to refresh, or quit and reopen the app). Home Assistant loads dashboard resources once per session, so a window opened before the install shows *Configuration error* on every HomeView card until it reloads.
+
 **Manual:**
 1. Copy `dist/homeview.js` to `/config/www/homeview.js`.
 2. Add it as a dashboard resource (*Settings > Dashboards > Resources*): URL `/local/homeview.js`, type *JavaScript module*.
@@ -146,6 +148,11 @@ For the full HomeView look:
 3. Hide the sidebar for the user (*Profile > Always hide sidebar*).
 4. Use your kiosk browser's kiosk mode.
 
+[`examples/wall-panel.yaml`](examples/wall-panel.yaml) is a complete one-screen panel: thermostat, clock, photo frame, Assist and seven tiles.
+- It fits 1280x800, 1180x820 and 1024x768 without scrolling, with the sidebar hidden. A docked sidebar takes 256px, so the wide layout then needs a 1344px screen.
+- Sections columns are at least 320px wide: three columns from 1088px, two from 736px, one below. The example keeps one section per width and hides the others with a *Screen* visibility condition. The two-column one drops three tiles; the phone one stacks everything in one column.
+- Cards in a hidden section pause: no clock or visualizer frames, no photo folder listing and no photo downloads until they are shown.
+
 ## Performance
 
 Measured on Chrome, 1280x800 at DPR 2, ten cards:
@@ -162,6 +169,7 @@ Live mode, by comparison, drops to about 20 fps at DPR 2 on the same machine whe
 ```sh
 npm install
 npm run check        # typecheck + unit tests + build -> dist/homeview.js
+npm run test:webkit  # the built bundle in WebKit (Safari, iOS app) at phone width; once: npx playwright-core install webkit
 dev/run-ha.sh <state-dir> <media-dir> [port]   # throwaway Home Assistant 2026.11.1 with demo entities
 ```
 

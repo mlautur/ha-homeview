@@ -33,6 +33,8 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
   private index = -1;
   private timer = 0;
   private listedAt = 0;
+  private fails = 0;
+  private parked = false;
   private loadedFor = "";
 
   static editorFields: EditorField[] = [
@@ -68,13 +70,18 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
 
   protected updated(changed: PropertyValues): void {
     super.updated?.(changed);
+    this.load();
+  }
+
+  /** list the folder for a new config; deferred while hidden so off-screen copies browse nothing */
+  private load(): boolean {
     const c = this._config;
-    if (!this.hass || !c) return;
+    if (!this.hass || !c || !this.onScreen) return false;
     const key = `${c.media}|${c.recursive}|${c.shuffle}`;
-    if (key !== this.loadedFor) {
-      this.loadedFor = key;
-      void this.relist(true);
-    }
+    if (key === this.loadedFor) return false;
+    this.loadedFor = key;
+    void this.relist(true);
+    return true;
   }
 
   private async relist(restart: boolean): Promise<void> {
@@ -97,6 +104,9 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
     clearTimeout(this.timer);
     const c = this._config;
     if (!c || !this.items.length || !this.isConnected) return;
+    // hidden (another screen size's section): fetch nothing until resume()
+    this.parked = !this.onScreen;
+    if (this.parked) return;
     if (Date.now() - this.listedAt > RELIST_MS) await this.relist(false);
     this.index = (this.index + 1) % this.items.length;
     try {
@@ -110,10 +120,19 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
       urls[back] = url;
       this._urls = urls;
       this._front = back;
+      this.fails = 0;
     } catch {
-      // skip unreadable files
+      this.fails++;
     }
-    this.timer = window.setTimeout(() => void this.next(), Math.max(5, c.interval ?? 30) * 1000);
+    // A picture this browser cannot decode (HEIC outside Safari, a broken file) is skipped
+    // at once instead of holding the previous one, or a blank frame, for a whole interval.
+    // After a run of failures, wait the interval so an unreadable folder does not spin.
+    const skip = this.fails > 0 && this.fails < Math.min(this.items.length, 20);
+    this.timer = window.setTimeout(() => void this.next(), skip ? 0 : Math.max(5, c.interval ?? 30) * 1000);
+  }
+
+  protected resume(): void {
+    if (!this.load() && this.parked) void this.next();
   }
 
   protected render(): TemplateResult {

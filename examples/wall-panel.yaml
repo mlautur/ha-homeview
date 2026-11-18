@@ -1,0 +1,133 @@
+# HomeView wall panel: one screen, no scrolling, on a 1280x800 landscape tablet,
+# a 1180x820 iPad and a 1024x768 iPad.
+#
+# Paste into a new dashboard: Settings > Dashboards > Add dashboard > New dashboard
+# from scratch, then the three-dot menu > Raw configuration editor.
+# Replace the entity ids and the photo folder with your own; to find a folder id,
+# open Media in the sidebar and browse to it. Hide the sidebar on the panel.
+#
+# Sections needs 320px per column: three columns from 1088px wide, two from 736px,
+# one below that (phones). Each width gets its own section; the others are hidden.
+#
+# Wide (36 grid columns, 9 rows):
+#   rows 1-6: thermostat 12x6 | clock + scene 6x3 | photo frame 12x6 | two lights 6x3
+#   rows 7-9: four tiles 6x3 around the Assist voice card 12x3
+# Compact (24 grid columns, 9 rows), without the porch light, purifier and curtains:
+#   rows 1-6: thermostat 10x6 | clock + scene 5x3 | photo frame 9x6
+#   rows 7-9: two lights 5x3 | Assist 9x3 | garage 5x3
+# Phone (12 grid columns, scrolls): thermostat, clock + scene, photo frame and
+#   Assist at full width, then the tiles in pairs.
+title: Panel
+views:
+  - title: Panel
+    path: panel
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        column_span: 3
+        visibility:
+          - condition: screen
+            media_query: "(min-width: 1088px)"
+        cards:
+          - &thermostat
+            type: custom:homeview-thermostat-card
+            entity: climate.thermostat
+            name: Thermostat
+            subtitle: Living Room
+            wallpaper: champagne
+            grid_options: { columns: 12, rows: 6 }
+          - &clock
+            type: custom:homeview-clock-card
+            seconds: sweep
+            grid_options: { columns: 6, rows: 3 }
+          - &photo
+            type: custom:homeview-photo-card
+            # Any folder the Media panel can browse: local media, a DLNA server,
+            # Synology Photos, Immich and others.
+            media: media-source://media_source/local/photos
+            recursive: true
+            shuffle: true
+            interval: 30
+            grid_options: { columns: 12, rows: 6 }
+          - &living_room
+            type: custom:homeview-tile-card
+            entity: light.living_room
+            name: Lights
+            subtitle: Living Room
+            grid_options: { columns: 6, rows: 3 }
+          - &scene
+            type: custom:homeview-tile-card
+            entity: scene.good_night
+            name: Good Night
+            subtitle: Scene
+            icon: mdi:weather-night
+            grid_options: { columns: 6, rows: 3 }
+          - &kitchen
+            type: custom:homeview-tile-card
+            entity: light.kitchen
+            name: Lights
+            subtitle: Kitchen
+            grid_options: { columns: 6, rows: 3 }
+          - &porch
+            type: custom:homeview-tile-card
+            entity: light.porch
+            name: Porch Light
+            subtitle: Outside
+            grid_options: { columns: 6, rows: 3 }
+          - &garage
+            type: custom:homeview-tile-card
+            entity: cover.garage_door
+            name: Garage Door
+            subtitle: Garage
+            # A wall panel gets bumped: open the dialog instead of moving the door.
+            tap_action: more-info
+            grid_options: { columns: 6, rows: 3 }
+          - &voice
+            type: custom:homeview-voice-card
+            name: Assist
+            speak: true
+            grid_options: { columns: 12, rows: 3 }
+          - &purifier
+            type: custom:homeview-tile-card
+            entity: fan.air_purifier
+            name: Air Purifier
+            subtitle: Office
+            grid_options: { columns: 6, rows: 3 }
+          - &curtains
+            type: custom:homeview-tile-card
+            entity: cover.curtains
+            name: Curtains
+            subtitle: Living Room
+            grid_options: { columns: 6, rows: 3 }
+      - type: grid
+        column_span: 2
+        visibility:
+          - condition: screen
+            media_query: "(min-width: 736px) and (max-width: 1087px)"
+        cards:
+          - { <<: *thermostat, grid_options: { columns: 10, rows: 6 } }
+          - { <<: *clock, grid_options: { columns: 5, rows: 3 } }
+          - { <<: *photo, grid_options: { columns: 9, rows: 6 } }
+          - { <<: *scene, grid_options: { columns: 5, rows: 3 } }
+          - { <<: *living_room, grid_options: { columns: 5, rows: 3 } }
+          - { <<: *kitchen, grid_options: { columns: 5, rows: 3 } }
+          - { <<: *voice, grid_options: { columns: 9, rows: 3 } }
+          - { <<: *garage, grid_options: { columns: 5, rows: 3 } }
+      - type: grid
+        column_span: 1
+        visibility:
+          - condition: screen
+            media_query: "(max-width: 735px)"
+        cards:
+          - { <<: *thermostat, grid_options: { columns: 12, rows: 6 } }
+          - { <<: *clock, grid_options: { columns: 6, rows: 3 } }
+          - { <<: *scene, grid_options: { columns: 6, rows: 3 } }
+          - { <<: *photo, grid_options: { columns: 12, rows: 6 } }
+          - { <<: *voice, grid_options: { columns: 12, rows: 3 } }
+          - { <<: *living_room, grid_options: { columns: 6, rows: 3 } }
+          - { <<: *kitchen, grid_options: { columns: 6, rows: 3 } }
+          - { <<: *porch, grid_options: { columns: 6, rows: 3 } }
+          - { <<: *garage, grid_options: { columns: 6, rows: 3 } }
+          - { <<: *purifier, grid_options: { columns: 6, rows: 3 } }
+          - { <<: *curtains, grid_options: { columns: 6, rows: 3 } }
