@@ -9,9 +9,9 @@ import { css, html, nothing, type PropertyValues, type TemplateResult } from "li
 import { HomeViewCard, glassStyles, type BaseConfig } from "./base.ts";
 import { registerCard, type GridOptions } from "../ha.ts";
 import { ICONS } from "../icons.ts";
-import { RECORDER_WORKLET, Resampler, audioFrame, toPcm16 } from "../util/audio.ts";
+import { Endpointer, RECORDER_WORKLET, Resampler, audioFrame, toPcm16 } from "../util/audio.ts";
 import type { EditorField } from "../editor.ts";
-import { phaseAfter, satellitePhase, type PipelineEvent, type VoicePhase } from "../logic.ts";
+import { phaseAfter, satellitePhase, voiceError, type PipelineEvent, type VoicePhase } from "../logic.ts";
 
 export interface VoiceConfig extends BaseConfig {
   pipeline?: string;
@@ -20,16 +20,8 @@ export interface VoiceConfig extends BaseConfig {
   speak?: boolean;
 }
 
-
-
-/** Map pipeline events to the visible phase (pure; unit-tested). */
-
-/** assist_satellite entity state -> phase */
-
-const LISTEN_LIMIT_MS = 15000;
-
-/** Errors arrive as Error objects or as Home Assistant {code, message} objects. */
-const errorText = (e: unknown): string => (e as { message?: string })?.message || String(e);
+/** backstop if the microphone stops delivering audio; the Endpointer caps listening at 15 s */
+const LISTEN_LIMIT_MS = 16000;
 const PHASE_TEXT: Record<VoicePhase, string> = {
   idle: "Tap to talk",
   listening: "Listening",
@@ -45,12 +37,18 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
     _heard: { state: true },
     _reply: { state: true },
     _error: { state: true },
+    _detail: { state: true },
+    _showDetail: { state: true },
     _typing: { state: true },
   };
   private _phase: VoicePhase = "idle";
   private _heard = "";
   private _reply = "";
   private _error = "";
+  private _detail = "";
+  private _showDetail = false;
+  /** the last typed request, re-sent by "try again"; empty after a spoken one */
+  private lastText = "";
   private _typing = false;
 
   private ctx?: AudioContext;
@@ -60,7 +58,12 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
   private resampler?: Resampler;
   private handlerId: number | null = null;
   private pending: Int16Array[] = [];
+  private endpointer?: Endpointer;
+  /** audio ended before Home Assistant handed out the stream id: send the end with the backlog */
+  private audioDone = false;
   private unsub?: () => Promise<void>;
+  /** bumped on teardown, so a run whose subscription resolves later is dropped */
+  private runId = 0;
   private conversationId?: string;
   private audio?: HTMLAudioElement;
   private speaking = false;
@@ -90,6 +93,11 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
 
   protected get square(): boolean {
     return false;
+  }
+
+  /** a tall cell would otherwise scale the text past what the orb and lines can hold */
+  protected refFrom(w: number, h: number): number {
+    return Math.min(w, h, 220);
   }
 
   protected cardClass(): string {
@@ -131,6 +139,8 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
       return;
     }
     this.reset();
+    this.lastText = "";
+    this.endpointer = new Endpointer();
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       this.ctx = new AudioContext();
@@ -159,32 +169,42 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
       }
       this._phase = "listening";
       this.stopTimer = window.setTimeout(() => this.endAudio(), LISTEN_LIMIT_MS);
-      await this.run({ start_stage: "stt", end_stage: this._config?.speak === false ? "intent" : "tts", input: { sample_rate: 16000 } });
+      await this.run({ start_stage: "stt", end_stage: this._config?.speak === false ? "intent" : "tts", input: { sample_rate: 16000, no_vad: true } });
     } catch (e) {
-      this.fail(e instanceof Error && e.name === "NotAllowedError" ? "Microphone permission was denied" : errorText(e));
+      this.fail(e);
     }
+  }
+
+  private retry(): void {
+    if (this.lastText) void this.ask(this.lastText);
+    else void this.talk();
   }
 
   private async ask(text: string): Promise<void> {
     if (!text.trim()) return;
+    await this.teardown();
     this.reset();
+    this.lastText = text;
     this._heard = text;
     this._phase = "thinking";
     try {
       await this.run({ start_stage: "intent", end_stage: this._config?.speak === false ? "intent" : "tts", input: { text } });
     } catch (e) {
-      this.fail(errorText(e));
+      this.fail(e);
     }
   }
 
   private async run(msg: Record<string, unknown>): Promise<void> {
     const c = this._config!;
-    this.unsub = await this.hass!.connection.subscribeMessage<PipelineEvent>((ev) => this.onEvent(ev), {
+    const id = ++this.runId;
+    const unsub = await this.hass!.connection.subscribeMessage<PipelineEvent>((ev) => id === this.runId && this.onEvent(ev), {
       type: "assist_pipeline/run",
       ...msg,
       ...(c.pipeline ? { pipeline: c.pipeline } : {}),
       ...(this.conversationId ? { conversation_id: this.conversationId } : {}),
     });
+    if (id === this.runId) this.unsub = unsub;
+    else await unsub().catch(() => undefined);
   }
 
   private onEvent(ev: PipelineEvent): void {
@@ -193,6 +213,8 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
       this.handlerId = d.runner_data?.stt_binary_handler_id ?? null;
       for (const pcm of this.pending) this.sendPcm(pcm);
       this.pending = [];
+      if (this.audioDone && this.handlerId !== null) this.hass?.connection.socket?.send(audioFrame(this.handlerId));
+      this.audioDone = false;
     }
     if (ev.type === "stt-vad-end" || ev.type === "stt-end") this.endAudio();
     if (ev.type === "stt-end") this._heard = d.stt_output?.text ?? "";
@@ -202,7 +224,7 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
       this._reply = r?.response?.speech?.plain?.speech ?? "";
     }
     if (ev.type === "tts-end" && d.tts_output?.url) this.play(d.tts_output.url);
-    if (ev.type === "error") this.fail(d.message ?? d.code ?? "Assist error");
+    if (ev.type === "error") this.fail(d);
     const next = phaseAfter(this._phase, ev);
     if (ev.type === "run-end") {
       void this.unsub?.();
@@ -215,9 +237,18 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
 
   private onAudio(samples: Float32Array): void {
     if (this._phase !== "listening" || !this.resampler) return;
-    const pcm = toPcm16(this.resampler.push(samples));
+    const frame = this.resampler.push(samples);
+    const pcm = toPcm16(frame);
     if (this.handlerId === null) this.pending.push(pcm);
     else this.sendPcm(pcm);
+    const heard = this.endpointer?.push(frame);
+    if (heard === "end") this.endAudio();
+    else if (heard === "none") this.noSpeech();
+  }
+
+  /** nothing was said: cancel the run rather than have speech-to-text guess at room noise */
+  private noSpeech(): void {
+    this.fail({ code: "stt-no-text-recognized", message: "No speech was detected" });
   }
 
   private sendPcm(pcm: Int16Array): void {
@@ -228,7 +259,10 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
   /** stop the microphone and tell HA the audio is complete */
   private endAudio(): void {
     clearTimeout(this.stopTimer);
-    if (this.handlerId !== null && this.stream) this.hass?.connection.socket?.send(audioFrame(this.handlerId));
+    if (this.stream) {
+      if (this.handlerId !== null) this.hass?.connection.socket?.send(audioFrame(this.handlerId));
+      else this.audioDone = true;
+    }
     if (this._phase === "listening") this._phase = "thinking";
     void this.stopMic();
   }
@@ -275,8 +309,11 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
     audio.play().catch(done);
   }
 
-  private fail(message: string): void {
-    this._error = message;
+  private fail(e: unknown): void {
+    const { text, detail } = voiceError(e);
+    console.warn("HomeView voice:", detail);
+    this._error = text;
+    this._detail = detail;
     this._phase = "error";
     void this.teardown();
   }
@@ -285,13 +322,17 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
     this._heard = "";
     this._reply = "";
     this._error = "";
+    this._detail = "";
+    this._showDetail = false;
     this.pending = [];
+    this.audioDone = false;
     this.handlerId = null;
     this.speaking = false;
     this.audio?.pause();
   }
 
   private async teardown(): Promise<void> {
+    this.runId++;
     clearTimeout(this.stopTimer);
     await this.stopMic();
     await this.unsub?.().catch(() => undefined);
@@ -313,7 +354,7 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
     if (!w || !h) return false; // hidden or not laid out yet: resume() restarts
-    if (canvas.width !== Math.round(w * k)) {
+    if (canvas.width !== Math.round(w * k) || canvas.height !== Math.round(h * k)) {
       canvas.width = Math.round(w * k);
       canvas.height = Math.round(h * k);
     }
@@ -389,19 +430,25 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
         : phase === "idle" && blocked
           ? "Type a request"
           : PHASE_TEXT[phase];
-    return html`<div class="voice-wrap">
+    const failed = phase === "error" && !c.satellite;
+    const [label, glyph] = phase === "listening" ? ["Stop listening", ICONS.stop] : failed ? ["Try again", ICONS.retry] : ["Talk to Assist", ICONS.mic];
+    const sheet = failed && this._showDetail;
+    return html`<div class="voice-wrap ${sheet ? "covered" : ""}">
       <div class="head ink">
         <span class="title">${c.name ?? "Assist"}</span>
-        <span class="sub status" aria-live="polite">${status}</span>
+        ${failed
+          ? html`<span class="sub status" aria-live="polite" role="button" tabindex="0" title=${this._detail} @click=${this.showDetail} @keydown=${(e: KeyboardEvent) => (e.key === "Enter" || e.key === " ") && this.showDetail(e)}>${status}</span>`
+          : html`<span class="sub status" aria-live="polite">${status}</span>`}
       </div>
-      <button class="orb" ?disabled=${!!c.satellite} aria-label=${phase === "listening" ? "Stop listening" : "Talk to Assist"} @click=${() => void this.talk()}>
+      <button class="orb" ?disabled=${!!c.satellite} aria-label=${label} @click=${() => void (failed ? this.retry() : this.talk())}>
         <canvas class="viz" aria-hidden="true"></canvas>
-        <span class="mic">${phase === "listening" ? ICONS.stop : ICONS.mic}</span>
+        <span class="mic">${glyph}</span>
       </button>
       <div class="lines ink" aria-live="polite">
         ${this._heard ? html`<div class="heard">&ldquo;${this._heard}&rdquo;</div>` : nothing}
         ${this._reply ? html`<div class="reply">${this._reply}</div>` : nothing}
-        ${blocked === "insecure" && !this._heard && !this._reply
+        ${failed && this._detail ? html`<button class="more" @click=${this.showDetail}><span>Details</span></button>` : nothing}
+        ${blocked === "insecure" && !this._heard && !this._reply && !failed
           ? html`<div class="notice">The microphone needs Home Assistant over HTTPS. Type instead, or see the README for options.</div>`
           : nothing}
       </div>
@@ -413,8 +460,22 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
               <button class="send" aria-label="Send">${ICONS.send}</button>
             </form>`
           : html`<button class="kbd" aria-label="Type a request" @click=${() => (this._typing = true)}>${ICONS.keyboard}</button>`}
+      ${sheet
+        ? html`<div class="sheet ink" role="dialog" aria-label="Error details">
+            <div class="sheet-head">
+              <span class="title">${this._error}</span>
+              <button class="more" @click=${() => (this._showDetail = false)}><span>Done</span></button>
+            </div>
+            <div class="detail">${this._detail}</div>
+          </div>`
+        : nothing}
     </div>`;
   }
+
+  private showDetail = (e: Event): void => {
+    e.preventDefault();
+    this._showDetail = true;
+  };
 
   private submit = (e: Event): void => {
     e.preventDefault();
@@ -444,7 +505,8 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
         height: 100%;
         box-sizing: border-box;
         display: grid;
-        grid-template-rows: auto 1fr auto auto;
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr) auto auto;
         justify-items: center;
         padding: calc(var(--hv-ref) * 0.07) calc(var(--hv-ref) * 0.08);
         gap: calc(var(--hv-ref) * 0.03);
@@ -472,7 +534,9 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
       ha-card[data-wide] .lines {
         grid-area: lines;
         text-align: left;
-        align-self: start;
+        align-self: stretch;
+        align-items: start;
+        justify-self: stretch;
       }
       ha-card[data-wide] .kbd {
         grid-area: kbd;
@@ -487,6 +551,16 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
         text-align: center;
         display: flex;
         flex-direction: column;
+        min-width: 0;
+        max-width: 100%;
+      }
+      /* never more than two lines, whatever Home Assistant reports */
+      .status {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        overflow: hidden;
+        overflow-wrap: anywhere;
       }
       .orb {
         appearance: none;
@@ -497,9 +571,10 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
         position: relative;
         width: 100%;
         height: 100%;
-        min-height: 88px;
+        min-height: 0;
         display: grid;
         place-items: center;
+        container-type: size;
         -webkit-tap-highlight-color: transparent;
         transition: transform 0.45s var(--hv-spring);
       }
@@ -516,10 +591,13 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
         width: 100%;
         height: 100%;
       }
+      /* stays inside the ring (drawn from 0.26 of the orb's short side) when the orb is squeezed */
       .mic {
         position: relative;
         width: calc(var(--hv-ref) * 0.2);
         height: calc(var(--hv-ref) * 0.2);
+        width: min(calc(var(--hv-ref) * 0.2), 38cqmin);
+        height: min(calc(var(--hv-ref) * 0.2), 38cqmin);
         filter: drop-shadow(var(--hv-shadow-text));
       }
       .mic svg {
@@ -530,6 +608,10 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
       .lines {
         text-align: center;
         max-width: 100%;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
         overflow: hidden;
         font-size: calc(var(--hv-ref) * 0.082);
         line-height: 1.35;
@@ -540,6 +622,89 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
       }
       .reply {
         font-weight: 600;
+      }
+      .heard,
+      .reply,
+      .notice {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        overflow: hidden;
+        overflow-wrap: anywhere;
+        flex: none;
+      }
+      .notice {
+        -webkit-line-clamp: 3;
+      }
+      [role="button"] {
+        cursor: pointer;
+      }
+      /* a failed run keeps what was heard and answered to one line each, beside "Details" */
+      ha-card.error .heard,
+      ha-card.error .reply {
+        -webkit-line-clamp: 1;
+      }
+      /* a short cell keeps the answer (when only speaking failed) and the way to the details */
+      ha-card.error[data-short] .heard {
+        display: none;
+      }
+      /* a short, narrow cell only has room for the status, the orb and the keyboard */
+      ha-card[data-short]:not([data-wide]) .lines {
+        display: none;
+      }
+      ha-card[data-short]:not([data-wide]) .status {
+        -webkit-line-clamp: 1;
+      }
+      .voice-wrap.covered > :not(.sheet) {
+        visibility: hidden;
+      }
+      /* the full error, over the card's own content */
+      .sheet {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        gap: calc(var(--hv-ref) * 0.03);
+        padding: calc(var(--hv-ref) * 0.07) calc(var(--hv-ref) * 0.08);
+      }
+      .sheet-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .sheet-head .title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .detail {
+        min-height: 0;
+        overflow-y: auto;
+        overflow-wrap: anywhere;
+        font-size: calc(var(--hv-ref) * 0.07);
+        line-height: 1.35;
+        color: var(--hv-ink-2);
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      .more {
+        appearance: none;
+        border: 0;
+        background: none;
+        padding: 0;
+        line-height: 1.25;
+        flex: none;
+        cursor: pointer;
+        color: var(--hv-ink-2);
+        font-size: calc(var(--hv-ref) * 0.07);
+      }
+      /* on the label, not the button: WebKit does not underline button text */
+      .more span {
+        text-decoration: underline;
+        text-underline-offset: 2px;
       }
       .notice {
         color: var(--hv-ink-2);

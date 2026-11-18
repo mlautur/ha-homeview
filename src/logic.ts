@@ -178,6 +178,31 @@ export function phaseAfter(phase: VoicePhase, ev: PipelineEvent): VoicePhase {
   }
 }
 
+/** Short status line for an Assist failure code; the full message goes to the details view. */
+function errorTitle(code: string): string {
+  if (code === "NotAllowedError" || code === "SecurityError") return "Microphone access was denied";
+  if (code === "NotFoundError") return "No microphone found";
+  if (code === "stt-no-text-recognized") return "Didn't catch that";
+  if (code === "pipeline-not-found") return "Assist pipeline not found";
+  if (code === "timeout") return "Assist timed out";
+  if (code.startsWith("wake")) return "Wake word detection failed";
+  if (code.startsWith("stt")) return "Couldn't recognize speech";
+  if (code.startsWith("intent")) return "Couldn't handle the request";
+  if (code.startsWith("tts")) return "Couldn't speak the reply";
+  return "Something went wrong";
+}
+
+/**
+ * A failed Assist run, from an Error/DOMException, a Home Assistant {code, message}
+ * object or a pipeline error event's data: a short status line plus the full text.
+ */
+export function voiceError(e: unknown): { text: string; detail: string } {
+  const err = (e ?? {}) as { code?: unknown; name?: unknown; message?: unknown };
+  const code = typeof err.code === "string" ? err.code : typeof err.name === "string" ? err.name : "";
+  const detail = (typeof err.message === "string" && err.message) || code || String(e);
+  return { text: errorTitle(code), detail };
+}
+
 export function satellitePhase(state: string | undefined): VoicePhase {
   switch (state) {
     case "listening":

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  clampStep, defaultSide, fromFormList, handAngles, isActive, listImages, mediaFolders, nowIn, phaseAfter, satellitePhase, setpoints, shuffled, tapService, toFormList,
+  clampStep, defaultSide, fromFormList, handAngles, isActive, listImages, mediaFolders, nowIn, phaseAfter, satellitePhase, setpoints, shuffled, tapService, toFormList, voiceError,
 } from "../src/logic.ts";
 
 const climate = (attributes: Record<string, unknown>, state = "heat") => ({ entity_id: "climate.x", state, attributes });
@@ -155,4 +155,19 @@ test("voice: satellite states", () => {
   assert.equal(satellitePhase("responding"), "responding");
   assert.equal(satellitePhase("idle"), "idle");
   assert.equal(satellitePhase(undefined), "error");
+});
+
+test("voice: failures become a short status line and keep the full detail", () => {
+  const tts = "Text-to-speech engine tts.example does not support language en or options {'voice': 'dummy'}: Unsupported options: voice";
+  assert.deepEqual(voiceError({ code: "tts-not-supported", message: tts }), { text: "Couldn't speak the reply", detail: tts });
+  assert.equal(voiceError({ code: "tts-failed", message: "x" }).text, "Couldn't speak the reply");
+  assert.equal(voiceError({ code: "stt-no-text-recognized", message: "No text recognized" }).text, "Didn't catch that");
+  assert.equal(voiceError({ code: "stt-stream-failed", message: "x" }).text, "Couldn't recognize speech");
+  assert.equal(voiceError({ code: "intent-failed", message: "x" }).text, "Couldn't handle the request");
+  assert.equal(voiceError({ code: "pipeline-not-found", message: "x" }).text, "Assist pipeline not found");
+  assert.equal(voiceError(new DOMException("Permission denied", "NotAllowedError")).text, "Microphone access was denied");
+  assert.deepEqual(voiceError(new Error("socket closed")), { text: "Something went wrong", detail: "socket closed" });
+  assert.deepEqual(voiceError({ code: "unknown_error" }), { text: "Something went wrong", detail: "unknown_error" });
+  assert.deepEqual(voiceError("Assist error"), { text: "Something went wrong", detail: "Assist error" });
+  assert.deepEqual(voiceError(undefined), { text: "Something went wrong", detail: "undefined" });
 });
