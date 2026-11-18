@@ -7,10 +7,11 @@ import { css, html, nothing, type PropertyValues, type TemplateResult } from "li
 import { HomeViewCard, glassStyles, type BaseConfig } from "./base.ts";
 import { registerCard, type GridOptions } from "../ha.ts";
 import type { EditorField } from "../editor.ts";
-import { listImages, shuffled } from "../logic.ts";
+import { listImages, mediaFolders, shuffled } from "../logic.ts";
 
 export interface PhotoConfig extends BaseConfig {
-  media: string;
+  /** one media-source folder, or a list of them: the slideshow cycles through all */
+  media: string | string[];
   interval?: number;
   shuffle?: boolean;
   recursive?: boolean;
@@ -38,7 +39,7 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
   private loadedFor = "";
 
   static editorFields: EditorField[] = [
-    { name: "media", label: "Media folder", required: true, helper: "A media-source folder, e.g. media-source://media_source/local/photos. Open Media in the sidebar to find the folder; DLNA, Synology Photos and other media servers HA can browse work too.", selector: { text: {} } },
+    { name: "media", label: "Media folders", required: true, list: true, helper: "One or more media-source folders, e.g. media-source://media_source/local/photos; the slideshow cycles through all of them. Open Media in the sidebar to find a folder; DLNA, Synology Photos and other media servers HA can browse work too.", selector: { text: { multiple: true } } },
     { name: "interval", label: "Seconds per picture", selector: { number: { min: 5, max: 3600, step: 1, mode: "box", unit_of_measurement: "s" } } },
     { name: "shuffle", selector: { boolean: {} } },
     { name: "recursive", label: "Include subfolders", selector: { boolean: {} } },
@@ -50,7 +51,8 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
   }
 
   protected validate(config: PhotoConfig): void {
-    if (!config.media || !config.media.startsWith("media-source://")) throw new Error("Set media to a media-source:// folder");
+    const folders = mediaFolders(config.media);
+    if (!folders.length || folders.some((m) => !m.startsWith("media-source://"))) throw new Error("Set media to a media-source:// folder, or a list of them");
   }
 
   getGridOptions(): GridOptions {
@@ -77,7 +79,7 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
   private load(): boolean {
     const c = this._config;
     if (!this.hass || !c || !this.onScreen) return false;
-    const key = `${c.media}|${c.recursive}|${c.shuffle}`;
+    const key = JSON.stringify([mediaFolders(c.media), !!c.recursive, !!c.shuffle]);
     if (key === this.loadedFor) return false;
     this.loadedFor = key;
     void this.relist(true);
@@ -96,7 +98,7 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
         void this.next();
       }
     } catch (e) {
-      this._error = `Cannot open ${c.media}: ${(e as { message?: string }).message ?? e}`;
+      this._error = `Cannot open ${mediaFolders(c.media).join(", ")}: ${(e as { message?: string }).message ?? e}`;
     }
   }
 

@@ -7,7 +7,7 @@ A card pack that brings an Apple HomeView-style wall panel to Home Assistant. Re
 | Thermostat | `custom:homeview-thermostat-card` | Big setpoint with a spring roll and chevrons. Single and heat/cool setpoints. Calls are debounced. |
 | Tile | `custom:homeview-tile-card` | Light, switch, fan, lock (optional unlock confirm), cover, scene, script. Tap acts, hold opens more-info. |
 | Clock | `custom:homeview-clock-card` | Analog clock on a round glass face. Smooth, ticking or hidden seconds hand. |
-| Photo frame | `custom:homeview-photo-card` | Slideshow from any Home Assistant media source folder (local media, DLNA, Synology Photos, ...). |
+| Photo frame | `custom:homeview-photo-card` | Slideshow from one or more Home Assistant media source folders (local media, DLNA, Synology Photos, ...). |
 | Voice | `custom:homeview-voice-card` | Talk to Assist with an audio-reactive visualizer, or mirror an `assist_satellite` device. |
 
 Every card works like a built-in card in the **Sections** view:
@@ -105,6 +105,16 @@ shuffle: true
 recursive: true           # include subfolders
 fit: cover                # cover | contain
 ```
+
+`media` also takes a list. The slideshow then cycles through every folder, shuffled across all of them when `shuffle` is on:
+
+```yaml
+media:
+  - media-source://media_source/local/photos/2024
+  - media-source://media_source/local/photos/2025
+```
+
+A folder that cannot be opened is skipped; the card shows an error only when none can be.
 
 To find a folder id:
 1. Open **Media** in the sidebar.
