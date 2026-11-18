@@ -114,7 +114,7 @@ media:
   - media-source://media_source/local/photos/2025
 ```
 
-A folder that cannot be opened is skipped; the card shows an error only when none can be.
+A listed folder that cannot be opened is skipped; the card shows an error only when none of them can be. A subfolder that cannot be opened still shows an error.
 
 To find a folder id:
 1. Open **Media** in the sidebar.
