@@ -801,4 +801,4 @@ try { registerProcessor("homeview-recorder", HomeViewRecorder); } catch {}
         color: #2b241d;
         background: rgb(255 255 255 / 0.85);
       }
-    `];customElements.define("homeview-voice-card",it);H("homeview-voice-card","HomeView Voice","Talk to Home Assistant Assist with an audio-reactive liquid-glass visualizer.");customElements.get("homeview-card-editor")||customElements.define("homeview-card-editor",ut);console.info("%c HOMEVIEW %c 0.1.3 ","background:#928980;color:#fff;border-radius:3px 0 0 3px","background:#2b241d;color:#fff;border-radius:0 3px 3px 0");
+    `];customElements.define("homeview-voice-card",it);H("homeview-voice-card","HomeView Voice","Talk to Home Assistant Assist with an audio-reactive liquid-glass visualizer.");customElements.get("homeview-card-editor")||customElements.define("homeview-card-editor",ut);console.info("%c HOMEVIEW %c 0.1.4 ","background:#928980;color:#fff;border-radius:3px 0 0 3px","background:#2b241d;color:#fff;border-radius:0 3px 3px 0");
