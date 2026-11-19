@@ -7,7 +7,7 @@ A card pack that brings an Apple HomeView-style wall panel to Home Assistant. Re
 | Thermostat | `custom:homeview-thermostat-card` | Big setpoint with a spring roll and chevrons. Single and heat/cool setpoints. Calls are debounced. |
 | Tile | `custom:homeview-tile-card` | Light, switch, fan, lock (optional unlock confirm), cover, scene, script. Tap acts, hold opens more-info. |
 | Clock | `custom:homeview-clock-card` | Analog clock on a round glass face. Smooth, ticking or hidden seconds hand. |
-| Photo frame | `custom:homeview-photo-card` | Slideshow from one or more Home Assistant media source folders (local media, DLNA, Synology Photos, ...). |
+| Photo frame | `custom:homeview-photo-card` | Slideshow from one or more Home Assistant media source folders (local media, DLNA, Synology Photos, ...). Swipe for the next or previous picture; tap for a full-screen slideshow. |
 | Voice | `custom:homeview-voice-card` | Talk to Assist with an audio-reactive visualizer, or mirror an `assist_satellite` device. |
 
 Every card works like a built-in card in the **Sections** view:
@@ -105,6 +105,10 @@ shuffle: true
 recursive: true           # include subfolders
 fit: cover                # cover | contain
 ```
+
+Swipe left on the frame for the next picture and right for the previous one. Previous retraces the pictures already shown, so it also works with `shuffle`. A swipe restarts the picture's time. Vertical drags still scroll the page.
+
+Tap the frame for a full-screen slideshow over the whole dashboard. It shows the same pictures at the same pace, and swiping left and right works there too. To close it, swipe down, press Escape or use the back gesture. It also closes by itself after 3 hours. While it runs, the screen stays on where the browser allows it: over HTTPS, in browsers with the Screen Wake Lock API.
 
 `media` also takes a list. The slideshow then cycles through every folder, shuffled across all of them when `shuffle` is on:
 

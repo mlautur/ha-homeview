@@ -26,6 +26,16 @@ type Listener = () => void;
 
 const instances = new WeakMap<Element, Backdrop>();
 
+const DIALOG = /^(ha-dialog|ha-md-dialog|hui-dialog-|ha-more-info)/;
+
+/** Whether `node` sits in a Home Assistant dialog (card picker, editor preview, more-info). */
+export function inDialog(node: Node): boolean {
+  for (let cur: Node | null = node; cur; cur = cur instanceof ShadowRoot ? cur.host : cur.parentNode) {
+    if (cur instanceof HTMLElement && DIALOG.test(cur.localName)) return true;
+  }
+  return false;
+}
+
 /** Walk up the composed tree from `node` and return the nearest view background element. */
 export function findViewBackground(node: Node): HTMLElement | null {
   let cur: Node | null = node;
@@ -35,7 +45,7 @@ export function findViewBackground(node: Node): HTMLElement | null {
       if (hit) return hit as HTMLElement;
     }
     // inside a dialog (card picker / editor preview): no wallpaper behind us
-    if (cur instanceof HTMLElement && /^(ha-dialog|ha-md-dialog|hui-dialog-|ha-more-info)/.test(cur.localName)) return null;
+    if (cur instanceof HTMLElement && DIALOG.test(cur.localName)) return null;
     cur = cur instanceof ShadowRoot ? cur.host : cur.parentNode;
   }
   return null;

@@ -163,6 +163,67 @@ export function fromFormList<T extends Record<string, unknown>>(data: T, names: 
   return config as T;
 }
 
+export type Gesture = "left" | "right" | "up" | "down" | "tap" | null;
+
+/**
+ * What a finished pointer gesture was, from how far it moved (px) and how long it took (ms).
+ * A swipe must clearly favour one axis; a quick flick counts at a shorter distance.
+ */
+export function gestureOf(dx: number, dy: number, ms: number): Gesture {
+  const ax = Math.abs(dx);
+  const ay = Math.abs(dy);
+  if (ax < 10 && ay < 10) return ms < 600 ? "tap" : null;
+  const flick = Math.max(ax, ay) / Math.max(ms, 1) > 0.5;
+  if (ax > ay * 1.2 && (ax >= 60 || (flick && ax >= 25))) return dx < 0 ? "left" : "right";
+  if (ay > ax * 1.2 && (ay >= 90 || (flick && ay >= 30))) return dy < 0 ? "up" : "down";
+  return null;
+}
+
+/**
+ * The pictures a slideshow has shown, so "previous" retraces them even when shuffled.
+ * After going back, "next" walks forward through the history before showing anything new.
+ */
+export class ShownHistory<T> {
+  private list: T[] = [];
+  private pos = -1;
+  private readonly max: number;
+  constructor(max = 100) {
+    this.max = max;
+  }
+
+  /** the entry one step back (-1) or forward (1) from the current one, if there is one */
+  peek(dir: -1 | 1): T | undefined {
+    return this.list[this.pos + dir];
+  }
+
+  /** move to the entry one step back or forward; returns it */
+  step(dir: -1 | 1): T | undefined {
+    const e = this.peek(dir);
+    if (e !== undefined) this.pos += dir;
+    return e;
+  }
+
+  /** a newly shown entry, after the current one; anything ahead of it is dropped */
+  push(e: T): void {
+    this.list.splice(this.pos + 1, Infinity, e);
+    if (this.list.length > this.max) this.list.shift();
+    this.pos = this.list.length - 1;
+  }
+
+  /** forget an entry that can no longer be shown (removed from the folder, unreadable) */
+  drop(e: T): void {
+    const i = this.list.indexOf(e);
+    if (i < 0) return;
+    this.list.splice(i, 1);
+    if (i <= this.pos) this.pos--;
+  }
+
+  clear(): void {
+    this.list = [];
+    this.pos = -1;
+  }
+}
+
 export function shuffled<T>(a: T[], rnd = Math.random): T[] {
   const b = a.slice();
   for (let i = b.length - 1; i > 0; i--) {
