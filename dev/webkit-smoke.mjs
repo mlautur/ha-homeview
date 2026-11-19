@@ -216,8 +216,8 @@ const result = await page.evaluate(async (replyUrl) => {
   return out;
 });
 
-// A spoken reply streamed without a length that never finishes playing: the card must give up and accept
-// taps. The reply events arrive in their own evaluate, which carries a user gesture as a real tap does, so
+// A spoken reply streamed without a length that never finishes playing: the card must stop it, show the
+// short reply error and re-send the typed request from the retry orb. The reply events arrive in their own evaluate, which carries a user gesture as a real tap does, so
 // the browser lets the reply play (it stays at 0 s in headless WebKit, like a stalled stream).
 await page.evaluate(async () => {
   const { micHass, log, tick } = window.__smoke;
@@ -259,16 +259,13 @@ result.reply = await page.evaluate(async () => {
   while (q(".sub").textContent === "Responding" && performance.now() - t0 < 15000) await new Promise((r) => setTimeout(r, 250));
   const settledAfter = +((performance.now() - t0) / 1000).toFixed(1);
   const status = q(".sub").textContent;
+  const stopped = audio.paused && !audio.hasAttribute("src");
+  const subs = log.filter((l) => l.startsWith("sub")).length;
   q(".orb").click();
   await tick();
-  return { playing, status, settledAfter, tapStarted: log.some((l) => /^sub\d+:stt$/.test(l)) };
+  return { playing, status, settledAfter, stopped, retried: log.slice(subs).some((l) => /^sub\d+:intent$/.test(l)) };
 });
 // a typed request sent while a reply plays: the old reply's give-up must not reset the new run to idle
-await page.evaluate(async () => {
-  const { card: el, tick } = window.__smoke;
-  el.shadowRoot.querySelector(".orb").click(); // stop the listening run started above
-  await tick();
-});
 await page.evaluate((replyUrl) => {
   const { emit } = window.__smoke;
   emit({ type: "run-start", data: { runner_data: {} } });
@@ -331,8 +328,9 @@ if (!(order("track-stop") >= 0 && order("unsub1") > order("track-stop") && order
 if (tapEarly.ends !== 1) fail.push(`mic tap stop before run-start: ${tapEarly.ends} end-of-audio frames, expected 1`);
 const { reply } = result;
 if (reply.playing !== "Responding") fail.push(`voice reply: status "${reply.playing}" while the reply plays, expected "Responding"`);
-if (reply.status === "Responding" || reply.settledAfter > 9) fail.push(`voice reply: still "Responding" ${reply.settledAfter} s after a playing reply stopped advancing (expected about 6 s)`);
-if (!reply.tapStarted) fail.push("voice reply: tapping the orb after the reply did not start listening");
+if (reply.status !== "Couldn't speak the reply" || reply.settledAfter > 9) fail.push(`voice reply: status "${reply.status}" ${reply.settledAfter} s after a playing reply stopped advancing (expected "Couldn't speak the reply" after about 6 s)`);
+if (!reply.stopped) fail.push("voice reply: the stalled reply was not paused and cleared, so it could play later under the card");
+if (!reply.retried) fail.push("voice reply: the retry orb did not re-send the typed request");
 const { replyThenTyped: rt } = result;
 if (rt.playing !== "Responding") fail.push(`voice reply then typed: status "${rt.playing}" while the second reply plays, expected "Responding"`);
 if (rt.after !== "Thinking") fail.push(`voice reply then typed: the new run shows "${rt.after}" after the old reply gave up, expected "Thinking"`);
@@ -344,4 +342,4 @@ if (fail.length) {
   console.error(`WebKit smoke FAILED:\n- ${fail.join("\n- ")}`);
   process.exit(1);
 }
-console.log("WebKit smoke passed: 5 cards defined and rendered, clock round, hidden photo card idle, voice error contained and round, mic flows end runs, stalled reply recovers, slow reply waits");
+console.log("WebKit smoke passed: 5 cards defined and rendered, clock round, hidden photo card idle, voice error contained and round, mic flows end runs, stalled reply stopped and retried, slow reply waits");

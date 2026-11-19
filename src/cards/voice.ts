@@ -311,18 +311,25 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
       if (audio.currentTime !== last) {
         last = audio.currentTime;
         still = 0;
-      } else if (++still >= (started ? REPLY_STALL_S : REPLY_START_S)) done();
+      } else if (++still >= (started ? REPLY_STALL_S : REPLY_START_S)) done(true);
     }, 1000);
-    const done = (): void => {
+    const done = (stalled = false): void => {
       clearInterval(watch);
       // a newer run (reset() clears speaking) or a newer reply owns the phase now
       if (this.audio !== audio || !this.speaking) return;
       this.speaking = false;
-      this._phase = "idle";
+      if (!stalled) {
+        this._phase = "idle";
+        return;
+      }
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+      this.fail({ code: "tts-failed", message: "The spoken reply stopped before it finished" });
     };
-    audio.onended = done;
-    audio.onerror = done;
-    audio.play().catch(done);
+    audio.onended = () => done();
+    audio.onerror = () => done();
+    audio.play().catch(() => done());
   }
 
   private fail(e: unknown): void {
