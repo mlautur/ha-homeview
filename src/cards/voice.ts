@@ -130,7 +130,19 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
     super.disconnectedCallback();
     cancelAnimationFrame(this.raf);
     void this.teardown();
-    this.audio?.pause();
+    if (this.speaking) {
+      this.speaking = false;
+      this._phase = "idle";
+    }
+    this.stopAudio();
+  }
+
+  private stopAudio(): void {
+    const audio = this.audio;
+    if (!audio) return;
+    audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
   }
 
   // ---------- pipeline ----------
@@ -308,7 +320,8 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
       still = 0;
     };
     const watch = window.setInterval(() => {
-      if (audio.currentTime !== last) {
+      if (this.audio !== audio || !this.speaking) done();
+      else if (audio.currentTime !== last) {
         last = audio.currentTime;
         still = 0;
       } else if (++still >= (started ? REPLY_STALL_S : REPLY_START_S)) done(true);
@@ -322,9 +335,7 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
         this._phase = "idle";
         return;
       }
-      audio.pause();
-      audio.removeAttribute("src");
-      audio.load();
+      this.stopAudio();
       this.fail({ code: "tts-failed", message: "The spoken reply stopped before it finished" });
     };
     audio.onended = () => done();

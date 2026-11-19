@@ -294,6 +294,24 @@ result.slowReply = await page.evaluate(async () => {
   await new Promise((r) => setTimeout(r, 7000));
   return { at7s: el.shadowRoot.querySelector(".sub").textContent };
 });
+// a card detached while its reply plays (dashboard view switch) and reattached later must be idle, not failed
+await page.evaluate((replyUrl) => {
+  const { emit } = window.__smoke;
+  emit({ type: "tts-end", data: { tts_output: { url: replyUrl } } });
+}, replyUrl);
+result.detached = await page.evaluate(async () => {
+  const { card: el } = window.__smoke;
+  const audio = el.audio;
+  const t1 = performance.now();
+  while (!(audio.readyState >= 3 && !audio.paused) && performance.now() - t1 < 5000) await new Promise((r) => setTimeout(r, 50));
+  const playing = el.shadowRoot.querySelector(".sub").textContent;
+  const parent = el.parentNode;
+  el.remove();
+  await new Promise((r) => setTimeout(r, 7500));
+  parent.appendChild(el);
+  await el.updateComplete;
+  return { playing, after: el.shadowRoot.querySelector(".sub").textContent, stopped: audio.paused && !audio.hasAttribute("src") };
+});
 await browser.close();
 tts.closeAllConnections();
 tts.close();
@@ -337,9 +355,13 @@ if (rt.after !== "Thinking") fail.push(`voice reply then typed: the new run show
 if (result.slowReply.at7s !== "Responding") fail.push(`voice slow reply: status "${result.slowReply.at7s}" 7 s into a reply whose first audio takes 8 s, expected "Responding"`);
 console.log(JSON.stringify(result.rendered));
 console.log(JSON.stringify(result.mic));
-console.log(JSON.stringify(result.reply), JSON.stringify(result.replyThenTyped), JSON.stringify(result.slowReply));
+const { detached } = result;
+if (detached.playing !== "Responding") fail.push(`voice reply detached: status "${detached.playing}" before detaching, expected "Responding"`);
+if (detached.after !== "Tap to talk") fail.push(`voice reply detached: reattached card shows "${detached.after}", expected "Tap to talk"`);
+if (!detached.stopped) fail.push("voice reply detached: the reply was not stopped and cleared");
+console.log(JSON.stringify(result.reply), JSON.stringify(result.replyThenTyped), JSON.stringify(result.slowReply), JSON.stringify(detached));
 if (fail.length) {
   console.error(`WebKit smoke FAILED:\n- ${fail.join("\n- ")}`);
   process.exit(1);
 }
-console.log("WebKit smoke passed: 5 cards defined and rendered, clock round, hidden photo card idle, voice error contained and round, mic flows end runs, stalled reply stopped and retried, slow reply waits");
+console.log("WebKit smoke passed: 5 cards defined and rendered, clock round, hidden photo card idle, voice error contained and round, mic flows end runs, stalled reply stopped and retried, slow reply waits, detached reply ends quietly");
