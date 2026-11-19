@@ -1,7 +1,7 @@
 /**
  * The photo frame's full-screen slideshow: the card's own pictures over the whole Home Assistant
  * view, on a blurred copy of the picture. Swipe left / right to step, swipe down (or Escape, or
- * the back gesture) to close; it also closes by itself after the card's `fullscreen_hours`.
+ * the back gesture) to close; it also closes by itself after 3 hours.
  * Attached to <body>, so no card or section layout can clip it.
  */
 import { LitElement, css, html, nothing, type TemplateResult } from "lit";
@@ -23,14 +23,13 @@ export interface SlideshowHost {
 }
 
 const CHROME_MS = 3000;
+const OPEN_MS = 3 * 3600 * 1000;
 const HISTORY_KEY = "homeviewSlideshow";
 
 export class HomeViewPhotoSlideshow extends LitElement {
   static properties = { state: { attribute: false }, _pull: { state: true }, _chrome: { state: true }, _closing: { state: true } };
   state: StageState = emptyStage();
   host?: SlideshowHost;
-  /** close by itself after this many hours */
-  hours = 3;
   private _pull = 0;
   private _chrome = true;
   private _closing = false;
@@ -53,7 +52,7 @@ export class HomeViewPhotoSlideshow extends LitElement {
     document.addEventListener("visibilitychange", this.onVisible);
     // no page scroll or pull-to-refresh behind the slideshow
     this.addEventListener("touchmove", this.noScroll, { passive: false });
-    this.closeTimer = window.setTimeout(() => this.close(), this.hours * 3600 * 1000);
+    this.closeTimer = window.setTimeout(() => this.close(), OPEN_MS);
     this.showChrome();
     void this.keepAwake();
   }

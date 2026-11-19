@@ -104,12 +104,11 @@ interval: 30              # seconds per picture
 shuffle: true
 recursive: true           # include subfolders
 fit: cover                # cover | contain
-fullscreen_hours: 3       # the full-screen slideshow closes by itself after this long
 ```
 
 Swipe left on the frame for the next picture and right for the previous one. Previous retraces the pictures already shown, so it also works with `shuffle`. A swipe restarts the picture's time. Vertical drags still scroll the page.
 
-Tap the frame for a full-screen slideshow over the whole dashboard. It shows the same pictures at the same pace, and swiping left and right works there too. To close it, swipe down, press Escape or use the back gesture. It also closes by itself after `fullscreen_hours` (3 by default). While it runs, the screen stays on where the browser allows it: over HTTPS, in browsers with the Screen Wake Lock API.
+Tap the frame for a full-screen slideshow over the whole dashboard. It shows the same pictures at the same pace, and swiping left and right works there too. To close it, swipe down, press Escape or use the back gesture. It also closes by itself after 3 hours. While it runs, the screen stays on where the browser allows it: over HTTPS, in browsers with the Screen Wake Lock API.
 
 `media` also takes a list. The slideshow then cycles through every folder, shuffled across all of them when `shuffle` is on:
 

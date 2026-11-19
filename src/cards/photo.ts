@@ -21,8 +21,6 @@ export interface PhotoConfig extends BaseConfig {
   shuffle?: boolean;
   recursive?: boolean;
   fit?: "cover" | "contain";
-  /** the full-screen slideshow (tap a picture) closes by itself after this many hours */
-  fullscreen_hours?: number;
 }
 
 const RELIST_MS = 30 * 60 * 1000;
@@ -71,7 +69,6 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> implements Slid
     { name: "shuffle", selector: { boolean: {} } },
     { name: "recursive", label: "Include subfolders", selector: { boolean: {} } },
     { name: "fit", selector: { select: { mode: "dropdown", options: [{ value: "cover", label: "Fill" }, { value: "contain", label: "Fit whole picture" }] } } },
-    { name: "fullscreen_hours", label: "Full-screen slideshow closes after", helper: "Tap a picture for a full-screen slideshow. Swipe down to close it; otherwise it closes by itself after this long (3 hours by default).", selector: { number: { min: 0.5, max: 24, step: 0.5, mode: "box", unit_of_measurement: "h" } } },
   ];
 
   static getStubConfig(): Partial<PhotoConfig> {
@@ -81,8 +78,6 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> implements Slid
   protected validate(config: PhotoConfig): void {
     const folders = mediaFolders(config.media);
     if (!folders.length || folders.some((m) => !m.startsWith("media-source://"))) throw new Error("Set media to a media-source:// folder, or a list of them");
-    const h = config.fullscreen_hours;
-    if (h !== undefined && !(typeof h === "number" && h > 0)) throw new Error("Set fullscreen_hours to a number of hours above 0");
   }
 
   getGridOptions(): GridOptions {
@@ -322,7 +317,6 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> implements Slid
     // not from the card editor's preview: the slideshow would open under the editor dialog
     if (this.slideshow || !this._stage.urls[this._stage.front] || inDialog(this)) return;
     const el = document.createElement("homeview-photo-slideshow") as HomeViewPhotoSlideshow;
-    el.hours = this._config?.fullscreen_hours ?? 3;
     el.host = this;
     el.state = this._stage;
     this.slideshow = el;

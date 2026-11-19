@@ -48,8 +48,8 @@ export function trackGestures(el: HTMLElement, h: GestureHandlers, vertical: boo
     const dy = e.clientY - start.y;
     const g = gestureOf(dx, dy, e.timeStamp - start.t);
     start = undefined;
-    // a horizontal drag never ends as a vertical swipe, and the other way round
-    const fits = g === "tap" || !axis || (axis === "x" ? g === "left" || g === "right" : g === "up" || g === "down");
+    // a drag never ends as a tap; a horizontal drag never ends as a vertical swipe, and the other way round
+    const fits = !axis || (axis === "x" ? g === "left" || g === "right" : g === "up" || g === "down");
     h.end(fits ? g : null, dx, dy);
   };
   const cancel = (e: PointerEvent): void => {

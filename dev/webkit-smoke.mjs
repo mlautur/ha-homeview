@@ -14,7 +14,7 @@
 // stays empty instead of giving up on the lost answer and trying again.
 // or if swiping the photo frame does not step to the next / previous picture (retracing a shuffled order),
 // or a vertical drag changes it, or a tap does not open a full-screen slideshow that covers the screen,
-// swipes along with the card, and closes on a swipe down, on Escape and by itself after fullscreen_hours.
+// swipes along with the card, and closes on a swipe down, on Escape and by itself after 3 hours.
 // One-time setup: npx playwright-core install webkit. Run: npm run test:webkit
 import { readFileSync } from "node:fs";
 import http from "node:http";
@@ -502,7 +502,7 @@ await gesturePage.evaluate(async () => {
     cell.appendChild(el);
     return el;
   };
-  const cards = [make({}), make({ fullscreen_hours: 0.5 })];
+  const cards = [make({})];
   const show = () => document.querySelector("homeview-photo-slideshow");
   // a pointer gesture from the middle of `target` by (dx, dy)
   const gesture = (target, dx, dy) => {
@@ -571,18 +571,18 @@ gs.reopened = !!(await g("slideshow"));
 await gesturePage.keyboard.press("Escape");
 await settle();
 gs.afterEscape = await g("slideshow");
+await g("swipe", 0, 9); // a tap that drifts past the drag threshold
+await settle(500);
+gs.driftOpen = !!(await g("slideshow"));
+gs.beforeDrift = await g("shown", 0);
+await settle(31000);
+gs.afterDrift = await g("shown", 0);
 await g("tap", 0);
 await settle(500);
 await settle(3 * 3600 * 1000 - 5000);
 gs.before3h = !!(await g("slideshow"));
 await settle(6000);
 gs.after3h = !!(await g("slideshow"));
-await g("tap", 1);
-await settle(500);
-await settle(30 * 60 * 1000 - 5000);
-gs.before30m = !!(await g("slideshow"));
-await settle(6000);
-gs.after30m = !!(await g("slideshow"));
 await browser.close();
 tts.closeAllConnections();
 tts.close();
@@ -672,8 +672,9 @@ if (gs.open && gs.open.shown !== gs.cardAtOpen) fail.push(`photo slideshow: open
 if (!gs.openAfterLeft || gs.openAfterLeft.shown === gs.open?.shown || gs.openAfterLeft.shown !== gs.cardAfterLeft) fail.push(`photo slideshow: a swipe left did not step the slideshow and the card together (${JSON.stringify([gs.openAfterLeft, gs.cardAfterLeft])})`);
 if (gs.afterSwipeDown) fail.push("photo slideshow: still open after a swipe down");
 if (!gs.reopened || gs.afterEscape) fail.push("photo slideshow: Escape did not close it");
+if (gs.driftOpen) fail.push("photo slideshow: a 9 px drag opened the slideshow as a tap");
+if (gs.afterDrift === gs.beforeDrift) fail.push("photo gestures: no timed change after a 9 px drag; the slideshow stopped");
 if (!gs.before3h || gs.after3h) fail.push(`photo slideshow: expected it open until 3 h and closed after (open before: ${gs.before3h}, after: ${gs.after3h})`);
-if (!gs.before30m || gs.after30m) fail.push(`photo slideshow: fullscreen_hours 0.5 expected it open until 30 min and closed after (before: ${gs.before30m}, after: ${gs.after30m})`);
 console.log(JSON.stringify(gs));
 if (fail.length) {
   console.error(`WebKit smoke FAILED:\n- ${fail.join("\n- ")}`);
