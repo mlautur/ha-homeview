@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  clampStep, defaultSide, fromFormList, handAngles, isActive, listImages, mediaFolders, nowIn, phaseAfter, satellitePhase, setpoints, shuffled, tapService, toFormList, voiceError,
+  clampStep, defaultSide, fromFormList, handAngles, isActive, listImages, mediaFolders, nowIn, phaseAfter, satellitePhase, setpoints, shuffled, tapService, toFormList, voiceError, within,
 } from "../src/logic.ts";
 
 const climate = (attributes: Record<string, unknown>, state = "heat") => ({ entity_id: "climate.x", state, attributes });
@@ -111,6 +111,24 @@ test("photo: lists every folder, without duplicates, skipping one that fails", a
   tree.c = { children: [{ media_class: "directory", media_content_type: "", media_content_id: "c/broken", can_expand: true }] };
   await assert.rejects(listImages(hass, ["a", "c"], true), /Path does not exist/);
   assert.deepEqual(await listImages(hass, ["a", "c"], false), ["a/1.jpg", "shared.jpg"]);
+});
+
+test("photo: a websocket answer that never comes fails after the limit instead of hanging the frame", async () => {
+  assert.equal(await within(Promise.resolve(7), 50), 7);
+  await assert.rejects(within(Promise.reject(new Error("Connection lost")), 50), /Connection lost/);
+  const t = Date.now();
+  await assert.rejects(within(new Promise(() => {}), 50), /did not answer/);
+  assert.ok(Date.now() - t < 1000);
+  // the live failure: the reply to the first album's browse is lost, so listing used to wait forever
+  const img = (id: string) => ({ media_class: "image", media_content_type: "image/jpeg", media_content_id: id, can_expand: false });
+  let calls = 0;
+  const lossy = {
+    callWS: <T>(m: Record<string, unknown>) =>
+      within(calls++ === 0 ? new Promise<T>(() => {}) : Promise.resolve({ children: [img(`${m.media_content_id}/1.jpg`)] } as T), 50),
+  };
+  assert.deepEqual(await listImages(lossy, ["a", "b"], false), ["b/1.jpg"]);
+  calls = 0;
+  await assert.rejects(listImages(lossy, ["a"], false), /did not answer/);
 });
 
 test("editor: a list field shows as a list and saves one value as a plain string", () => {

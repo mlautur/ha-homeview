@@ -10,6 +10,8 @@
 // or if a spoken reply streamed without a length (as Home Assistant streams TTS) leaves the card stuck in
 // "Responding": headless WebKit reports it as playing but never advances it, like a stalled stream,
 // or if a reply whose first audio is slow to arrive (slow TTS or agent) is given up before it plays.
+// or if a photo frame whose Home Assistant answers are lost (a tablet's Wi-Fi drops, or it sleeps, mid-request)
+// stays empty instead of giving up on the lost answer and trying again.
 // One-time setup: npx playwright-core install webkit. Run: npm run test:webkit
 import { readFileSync } from "node:fs";
 import http from "node:http";
@@ -399,6 +401,59 @@ result.detached = await page.evaluate(async () => {
   await el.updateComplete;
   return { playing, after: el.shadowRoot.querySelector(".sub").textContent, stopped: audio.paused && !audio.hasAttribute("src") };
 });
+// lost answers: the first folder list and the first picture's resolve never answer (a reply lost on a
+// connection that died without closing). Fake clock, so the 30 s answer limit and the retry run instantly.
+const photoPage = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true });
+photoPage.on("pageerror", (e) => errors.push(e.message));
+await photoPage.clock.install();
+await photoPage.route("https://homeview.test/", (r) => r.fulfill({ contentType: "text/html", body: "<!doctype html><body style='margin:0;background:#888'></body>" }));
+await photoPage.goto("https://homeview.test/");
+await photoPage.addScriptTag({
+  content: `customElements.define("ha-card", class extends HTMLElement {
+    constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = "<style>:host{display:block}</style><slot></slot>"; }
+  });`,
+});
+await photoPage.addScriptTag({ type: "module", content: bundle });
+await photoPage.evaluate(async () => {
+  await customElements.whenDefined("homeview-photo-card");
+  const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
+  const img = (id) => ({ media_class: "image", media_content_type: "image/png", media_content_id: id, can_expand: false });
+  const calls = (window.__calls = []);
+  const lost = new Promise(() => {});
+  const hass = {
+    states: {}, entities: {}, devices: {}, areas: {}, config: { unit_system: { temperature: "°F" } },
+    callService: async () => {}, connection: { subscribeMessage: async () => () => {} }, hassUrl: (p) => p,
+    callWS: (m) => {
+      calls.push(m.type);
+      const nth = calls.filter((t) => t === m.type).length;
+      if (m.type === "media_source/browse_media") return nth === 1 ? lost : Promise.resolve({ children: [img("a.png"), img("b.png")] });
+      if (m.type === "media_source/resolve_media") return nth === 1 ? lost : Promise.resolve({ url: png });
+      return Promise.resolve({});
+    },
+  };
+  const cell = document.body.appendChild(document.createElement("div"));
+  cell.style.cssText = "width:358px;height:376px;margin:8px";
+  const el = document.createElement("homeview-photo-card");
+  el.setConfig({ media: "media-source://media_source/local", interval: 30 });
+  el.hass = hass;
+  cell.appendChild(el);
+  await el.updateComplete;
+});
+const frame = async () => {
+  await photoPage.waitForTimeout(300); // real time for the picture to decode and the card to render
+  return photoPage.evaluate(() => {
+    const root = document.querySelector("homeview-photo-card").shadowRoot;
+    return { picture: !!root.querySelector("img.front")?.getAttribute("src"), msg: root.querySelector(".msg")?.textContent ?? "", calls: window.__calls.length };
+  });
+};
+result.lostAnswers = {};
+await photoPage.clock.runFor(5000);
+result.lostAnswers.at5s = await frame();
+await photoPage.clock.runFor(30000); // the lost folder list gives up at 30 s
+result.lostAnswers.at35s = await frame();
+await photoPage.clock.runFor(10000); // retried 10 s later; that picture's resolve is lost too
+await photoPage.clock.runFor(31000); // ...and gives up at 30 s, so the next picture shows
+result.lostAnswers.at76s = await frame();
 await browser.close();
 tts.closeAllConnections();
 tts.close();
@@ -469,8 +524,13 @@ if (detached.playing !== "Responding") fail.push(`voice reply detached: status "
 if (detached.after !== "Tap to talk") fail.push(`voice reply detached: reattached card shows "${detached.after}", expected "Tap to talk"`);
 if (!detached.stopped) fail.push("voice reply detached: the reply was not stopped and cleared");
 console.log(JSON.stringify(result.reply), JSON.stringify(result.replyThenTyped), JSON.stringify(result.slowReply), JSON.stringify(detached));
+const { lostAnswers: la } = result;
+if (la.at5s.picture) fail.push("photo lost answers: a picture showed before any folder was listed");
+if (!/did not answer/.test(la.at35s.msg)) fail.push(`photo lost answers: 35 s after a folder list that never answered the frame says "${la.at35s.msg}", expected that Home Assistant did not answer`);
+if (!la.at76s.picture || la.at76s.msg) fail.push(`photo lost answers: the frame is still empty (${JSON.stringify(la.at76s)}) after a lost folder list and a lost picture, expected a retry to show a picture`);
+console.log(JSON.stringify(la));
 if (fail.length) {
   console.error(`WebKit smoke FAILED:\n- ${fail.join("\n- ")}`);
   process.exit(1);
 }
-console.log("WebKit smoke passed: 5 cards defined and rendered, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly");
+console.log("WebKit smoke passed: 5 cards defined and rendered, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly, photo frame recovers from lost answers");

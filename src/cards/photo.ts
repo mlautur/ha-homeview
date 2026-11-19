@@ -7,7 +7,7 @@ import { css, html, nothing, type PropertyValues, type TemplateResult } from "li
 import { HomeViewCard, glassStyles, type BaseConfig } from "./base.ts";
 import { registerCard, type GridOptions } from "../ha.ts";
 import type { EditorField } from "../editor.ts";
-import { listImages, mediaFolders, shuffled } from "../logic.ts";
+import { listImages, mediaFolders, shuffled, within } from "../logic.ts";
 
 export interface PhotoConfig extends BaseConfig {
   /** one media-source folder, or a list of them: the slideshow cycles through all */
@@ -20,6 +20,10 @@ export interface PhotoConfig extends BaseConfig {
 
 
 const RELIST_MS = 30 * 60 * 1000;
+/** longest wait for one websocket answer or one picture; a normal browse of a 1,500-photo album takes under 1 s */
+const ANSWER_MS = 30 * 1000;
+/** a folder list that failed is tried again after 10 s, doubling up to 5 min */
+const retryMs = (failures: number): number => Math.min(5 * 60 * 1000, 10 * 1000 * 2 ** failures);
 
 
 /** Collect image ids under a media-source folder (breadth first, bounded). */
@@ -37,6 +41,8 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
   private fails = 0;
   private parked = false;
   private loadedFor = "";
+  private listRun = 0;
+  private listFails = 0;
 
   static editorFields: EditorField[] = [
     { name: "media", label: "Media folders", required: true, list: true, helper: "One or more media-source folders, e.g. media-source://media_source/local/photos; the slideshow cycles through all of them. Open Media in the sidebar to find a folder; DLNA, Synology Photos and other media servers HA can browse work too.", selector: { text: { multiple: true } } },
@@ -82,23 +88,40 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
     const key = JSON.stringify([mediaFolders(c.media), !!c.recursive, !!c.shuffle]);
     if (key === this.loadedFor) return false;
     this.loadedFor = key;
+    this.listFails = 0;
     void this.relist(true);
     return true;
   }
 
+  /** the folder list for the current config; a failed first list is retried (with backoff) instead of leaving the frame empty */
   private async relist(restart: boolean): Promise<void> {
     const c = this._config!;
+    const hass = this.hass!;
+    const run = ++this.listRun;
+    clearTimeout(this.timer);
     try {
-      const ids = await listImages(this.hass!, c.media, !!c.recursive);
+      const ids = await listImages({ callWS: <T>(m: Record<string, unknown>) => within(hass.callWS<T>(m), ANSWER_MS) }, c.media, !!c.recursive);
+      if (run !== this.listRun) return; // a newer list (new config, reattached card) owns the slideshow
       this.items = c.shuffle ? shuffled(ids) : ids;
       this.listedAt = Date.now();
+      this.listFails = 0;
       this._error = ids.length ? "" : "No pictures in this folder";
       if (restart) {
         this.index = -1;
         void this.next();
       }
     } catch (e) {
-      this._error = `Cannot open ${mediaFolders(c.media).join(", ")}: ${(e as { message?: string }).message ?? e}`;
+      if (run !== this.listRun) return;
+      // a periodic relist that fails keeps the pictures it has; next() tries again on the following picture
+      if (!restart) return;
+      // Home Assistant rejects with {code, message}, or {error: {code, message}} when the connection drops
+      const err = e as { message?: string; error?: { message?: string } };
+      this._error = `Cannot open ${mediaFolders(c.media).join(", ")}: ${err.message ?? err.error?.message ?? e}`;
+      if (!this.isConnected) return;
+      this.timer = window.setTimeout(() => {
+        if (this.onScreen) void this.relist(true);
+        else this.loadedFor = ""; // hidden meanwhile: resume() lists again once it is shown
+      }, retryMs(this.listFails++));
     }
   }
 
@@ -112,11 +135,11 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
     if (Date.now() - this.listedAt > RELIST_MS) await this.relist(false);
     this.index = (this.index + 1) % this.items.length;
     try {
-      const r = await this.hass!.callWS<{ url: string }>({ type: "media_source/resolve_media", media_content_id: this.items[this.index], expires: 3600 });
+      const r = await within(this.hass!.callWS<{ url: string }>({ type: "media_source/resolve_media", media_content_id: this.items[this.index], expires: 3600 }), ANSWER_MS);
       const url = r.url.startsWith("http") ? r.url : this.hass!.hassUrl(r.url);
       const img = new Image();
       img.src = url;
-      await img.decode(); // swap only once the next picture is ready
+      await within(img.decode(), ANSWER_MS); // swap only once the next picture is ready
       const back = 1 - this._front;
       const urls: [string, string] = [...this._urls] as [string, string];
       urls[back] = url;
