@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import http from "node:http";
 import { webkit } from "playwright-core";
 
-// dev/fixtures/silence.mp3: 1 s of silence (ffmpeg -f lavfi -i anullsrc=r=22050:cl=mono -t 1 -b:a 32k),
+// dev/fixtures/silence.mp3: 5 s of silence (ffmpeg -f lavfi -i anullsrc=r=22050:cl=mono -t 5 -b:a 32k),
 // sent in chunks with no Content-Length, so the browser cannot know its duration
 const mp3 = readFileSync(new URL("fixtures/silence.mp3", import.meta.url));
 // /slow.mp3 holds back its first bytes for 8 s: longer than the playing-stall limit, shorter than the start limit
@@ -248,11 +248,16 @@ await page.evaluate((replyUrl) => {
 result.reply = await page.evaluate(async () => {
   const { card: el, log, tick } = window.__smoke;
   const q = (s) => el.shadowRoot.querySelector(s);
-  await new Promise((r) => setTimeout(r, 1500));
+  // once the reply plays, stop it under the card, as a stalled stream or a dead output device would; nothing
+  // but the card's own watchdog can end it then (headless WebKit may not advance playback at all: same case)
+  const audio = el.audio;
+  const t1 = performance.now();
+  while (!(audio.readyState >= 3 && !audio.paused) && performance.now() - t1 < 5000) await new Promise((r) => setTimeout(r, 50));
+  audio.pause();
   const playing = q(".sub").textContent;
   const t0 = performance.now();
   while (q(".sub").textContent === "Responding" && performance.now() - t0 < 15000) await new Promise((r) => setTimeout(r, 250));
-  const settledAfter = +((performance.now() - t0) / 1000 + 1.5).toFixed(1);
+  const settledAfter = +((performance.now() - t0) / 1000).toFixed(1);
   const status = q(".sub").textContent;
   q(".orb").click();
   await tick();
@@ -293,6 +298,7 @@ result.slowReply = await page.evaluate(async () => {
   return { at7s: el.shadowRoot.querySelector(".sub").textContent };
 });
 await browser.close();
+tts.closeAllConnections();
 tts.close();
 
 const fail = [];
@@ -325,7 +331,7 @@ if (!(order("track-stop") >= 0 && order("unsub1") > order("track-stop") && order
 if (tapEarly.ends !== 1) fail.push(`mic tap stop before run-start: ${tapEarly.ends} end-of-audio frames, expected 1`);
 const { reply } = result;
 if (reply.playing !== "Responding") fail.push(`voice reply: status "${reply.playing}" while the reply plays, expected "Responding"`);
-if (reply.status === "Responding") fail.push(`voice reply: still "Responding" ${reply.settledAfter} s after a streamed reply stopped advancing`);
+if (reply.status === "Responding" || reply.settledAfter > 9) fail.push(`voice reply: still "Responding" ${reply.settledAfter} s after a playing reply stopped advancing (expected about 6 s)`);
 if (!reply.tapStarted) fail.push("voice reply: tapping the orb after the reply did not start listening");
 const { replyThenTyped: rt } = result;
 if (rt.playing !== "Responding") fail.push(`voice reply then typed: status "${rt.playing}" while the second reply plays, expected "Responding"`);
