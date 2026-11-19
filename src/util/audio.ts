@@ -122,5 +122,6 @@ class HomeViewRecorder extends AudioWorkletProcessor {
     return true;
   }
 }
-registerProcessor("homeview-recorder", HomeViewRecorder);
+// added once per tap to the card's one AudioContext: the name is already taken from the second tap on
+try { registerProcessor("homeview-recorder", HomeViewRecorder); } catch {}
 `;

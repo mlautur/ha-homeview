@@ -9,7 +9,8 @@ import { css, html, nothing, type PropertyValues, type TemplateResult } from "li
 import { HomeViewCard, glassStyles, type BaseConfig } from "./base.ts";
 import { registerCard, type GridOptions } from "../ha.ts";
 import { ICONS } from "../icons.ts";
-import { Endpointer, RECORDER_WORKLET, Resampler, audioFrame, toPcm16 } from "../util/audio.ts";
+import { Endpointer, Resampler, audioFrame, toPcm16 } from "../util/audio.ts";
+import { openMic, type Mic } from "../util/mic.ts";
 import type { EditorField } from "../editor.ts";
 import { phaseAfter, satellitePhase, voiceError, type PipelineEvent, type VoicePhase } from "../logic.ts";
 
@@ -55,10 +56,13 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
   private lastText = "";
   private _typing = false;
 
+  /** one per card, made on the first tap (iOS only starts audio from a tap) and reused by every run and reply */
   private ctx?: AudioContext;
-  private stream?: MediaStream;
+  /** the only live microphone capture; every way out of listening closes it (stopMic) */
+  private mic?: Mic;
+  /** cancels the current spoken run's microphone opening (teardown) */
+  private abort?: AbortController;
   private analyser?: AnalyserNode;
-  private recorder?: AudioWorkletNode | ScriptProcessorNode;
   private resampler?: Resampler;
   private handlerId: number | null = null;
   private pending: Int16Array[] = [];
@@ -130,11 +134,13 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
     super.disconnectedCallback();
     cancelAnimationFrame(this.raf);
     void this.teardown();
-    if (this.speaking) {
-      this.speaking = false;
-      this._phase = "idle";
-    }
+    // the run is gone: a card shown again starts from idle, not "Listening" or "Thinking" with nothing behind it
+    this.speaking = false;
+    if (this._phase !== "error") this._phase = "idle";
     this.stopAudio();
+    void this.ctx?.close();
+    this.ctx = undefined;
+    this.analyser = undefined;
   }
 
   private stopAudio(): void {
@@ -154,40 +160,27 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
       this._typing = true;
       return;
     }
+    // made inside the tap, before any await: iOS only lets audio start from a user gesture
+    const ctx = (this.ctx ??= new AudioContext());
+    void this.teardown(); // releases at once; only the unsubscribe round trip is left to finish
     this.reset();
     this.lastText = "";
     this.endpointer = new Endpointer();
+    this.resampler = new Resampler(ctx.sampleRate);
+    const abort = (this.abort = new AbortController());
+    // listening from the tap: a second tap while the microphone opens cancels instead of opening another
+    this._phase = "listening";
+    this.analyser = undefined;
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-      this.ctx = new AudioContext();
-      await this.ctx.resume(); // some browsers start contexts suspended
-      const source = this.ctx.createMediaStreamSource(this.stream);
-      this.analyser = this.ctx.createAnalyser();
-      this.analyser.fftSize = 256;
-      this.analyser.smoothingTimeConstant = 0.6;
-      source.connect(this.analyser);
-      this.resampler = new Resampler(this.ctx.sampleRate);
-      if (this.ctx.audioWorklet) {
-        const url = URL.createObjectURL(new Blob([RECORDER_WORKLET], { type: "text/javascript" }));
-        await this.ctx.audioWorklet.addModule(url);
-        URL.revokeObjectURL(url);
-        const node = new AudioWorkletNode(this.ctx, "homeview-recorder");
-        node.port.onmessage = (e: MessageEvent<Float32Array>) => this.onAudio(e.data);
-        source.connect(node);
-        this.recorder = node;
-      } else {
-        // Safari < 14.1
-        const node = this.ctx.createScriptProcessor(4096, 1, 1);
-        node.onaudioprocess = (e) => this.onAudio(e.inputBuffer.getChannelData(0));
-        source.connect(node);
-        node.connect(this.ctx.destination);
-        this.recorder = node;
-      }
-      this._phase = "listening";
+      const mic = await openMic(ctx, abort.signal, (samples) => this.onAudio(samples));
+      if (abort.signal.aborted) return mic.close();
+      this.mic = mic;
+      this.analyser = mic.analyser;
       this.stopTimer = window.setTimeout(() => this.endAudio(), LISTEN_LIMIT_MS);
       await this.run({ start_stage: "stt", end_stage: this._config?.speak === false ? "intent" : "tts", input: { sample_rate: 16000, no_vad: true } });
     } catch (e) {
-      this.fail(e);
+      // cancelled (typed request, second tap, detach): whoever cancelled owns the phase now
+      if (!abort.signal.aborted) this.fail(e);
     }
   }
 
@@ -198,7 +191,7 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
 
   private async ask(text: string): Promise<void> {
     if (!text.trim()) return;
-    await this.teardown();
+    void this.teardown(); // releases at once; only the unsubscribe round trip is left to finish
     this.reset();
     this.lastText = text;
     this._heard = text;
@@ -275,19 +268,27 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
   /** stop the microphone and tell HA the audio is complete */
   private endAudio(): void {
     clearTimeout(this.stopTimer);
-    if (this.stream) {
+    if (!this.mic && this._phase === "listening") {
+      // tapped again while the microphone was still opening: nothing was recorded, cancel the run
+      this._phase = "idle";
+      void this.teardown();
+      return;
+    }
+    if (this.mic) {
       if (this.handlerId !== null) this.hass?.connection.socket?.send(audioFrame(this.handlerId));
       else this.audioDone = true;
     }
     if (this._phase === "listening") this._phase = "thinking";
-    void this.stopMic();
+    this.stopMic();
   }
 
-  private async stopMic(): Promise<void> {
-    this.stream?.getTracks().forEach((t) => t.stop());
-    this.stream = undefined;
-    this.recorder?.disconnect();
-    this.recorder = undefined;
+  /**
+   * A capture left open keeps delivering audio after its run (silence once the tracks stop), and every
+   * earlier tap then adds a copy to the next run, garbling it: close it on every way out of listening.
+   */
+  private stopMic(): void {
+    this.mic?.close();
+    this.mic = undefined;
     this.handlerId = null;
   }
 
@@ -365,12 +366,17 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
     this.audio?.pause();
   }
 
+  /** ends the current run on any path (error, typed request, new tap, detach); releases everything it holds */
   private async teardown(): Promise<void> {
     this.runId++;
+    this.abort?.abort();
+    this.abort = undefined;
     clearTimeout(this.stopTimer);
-    await this.stopMic();
-    await this.unsub?.().catch(() => undefined);
+    this.stopMic();
+    // taken before awaiting, so a run started meanwhile keeps its own subscription
+    const unsub = this.unsub;
     this.unsub = undefined;
+    await unsub?.().catch(() => undefined);
   }
 
   // ---------- visualizer ----------

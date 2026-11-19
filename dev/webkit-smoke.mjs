@@ -4,6 +4,9 @@
 // photo card in a hidden section browses the media server before it is shown, or if a failed
 // Assist run spills out of the voice card, stretches its visualizer or does not clear on retry, or
 // if a mic run (stubbed microphone) sends noise to speech-to-text, drops a tap-stop or leaves a run open,
+// or if an earlier tap's recorder still feeds a later run, if more than one microphone capture is ever live or one
+// outlives its run (stop, error, typed request, detach, a tap or typed request while the microphone opens),
+// if a long transcript or reply grows past two lines or out of the card,
 // or if a spoken reply streamed without a length (as Home Assistant streams TTS) leaves the card stuck in
 // "Responding": headless WebKit reports it as playing but never advances it, like a stalled stream,
 // or if a reply whose first audio is slow to arrive (slow TTS or agent) is given up before it plays.
@@ -134,28 +137,60 @@ const result = await page.evaluate(async (replyUrl) => {
     out.voice.push(r);
   }
 
+  // a long transcript and reply (a run that heard a whole paragraph) stay inside the card, two lines each,
+  // in the live wall-panel cell: a 12x3 voice card, 374x184 at a 390 px viewport, idle
+  {
+    const cell = document.body.appendChild(document.createElement("div"));
+    cell.style.cssText = "width:374px;height:184px;margin:8px";
+    const el = document.createElement("homeview-voice-card");
+    el.setConfig({ name: "Assist", speak: true, grid_options: { columns: 12, rows: 3 } });
+    el.hass = hass;
+    cell.appendChild(el);
+    el._heard = "Привет! Как твои дела сегодня? Я только что закончил читать интересную книгу и решил поделиться своими мыслями о ней.";
+    el._reply = "Привет! Всё отлично, спасибо. Рада за тебя! О какой книге идет речь? Расскажи, что тебе понравилось больше всего.";
+    await el.updateComplete;
+    await new Promise((r) => setTimeout(r, 100));
+    const q = (s) => el.shadowRoot.querySelector(s);
+    const card = q("ha-card").getBoundingClientRect();
+    const m = (s) => { const b = q(s).getBoundingClientRect(); return { lines: Math.round(b.height / parseFloat(getComputedStyle(q(s)).lineHeight)), out: b.bottom > card.bottom + 1 || b.right > card.right + 1 }; };
+    out.longText = { status: q(".sub").textContent, heard: m(".heard"), reply: m(".reply") };
+    cell.remove();
+  }
+
   // the microphone flows, with a stubbed mic and audio graph fed faster than real time
   const log = [];
-  let track;
+  const tracks = [];
+  const recorders = [];
+  // while set, getUserMedia waits for it, as it does while the permission prompt is open
+  let gate = null;
   Object.defineProperty(MediaDevices.prototype, "getUserMedia", {
     configurable: true,
     value: async () => {
-      track = { readyState: "live", stop() { this.readyState = "ended"; log.push("track-stop"); } };
+      if (gate) await gate;
+      const track = { readyState: "live", stop() { this.readyState = "ended"; log.push("track-stop"); } };
+      tracks.push(track);
       return { getTracks: () => [track] };
     },
   });
+  // what still holds the microphone or can still deliver audio: never more than one of each, none once a run is over
+  const live = () => ({ tracks: tracks.filter((t) => t.readyState === "live").length, recorders: recorders.filter((w) => w.port.onmessage).length });
   let worklet;
+  let contexts = 0;
   const node = () => ({ connect() {}, disconnect() {} });
+  // disconnect() does nothing here, as a real recorder still attached to the graph keeps delivering audio
   window.AudioContext = class {
+    constructor() { contexts++; }
     sampleRate = 16000;
     destination = node();
     audioWorklet = { addModule: async () => {} };
     async resume() {}
+    async close() {}
     createMediaStreamSource() { return node(); }
     createAnalyser() { return { ...node(), frequencyBinCount: 128, getByteFrequencyData() {} }; }
   };
-  window.AudioWorkletNode = class { constructor() { worklet = this; this.port = { onmessage: null }; } connect() {} disconnect() {} };
+  window.AudioWorkletNode = class { constructor() { worklet = this; recorders.push(this); this.port = { onmessage: null }; } connect() {} disconnect() {} };
   let emit;
+  let subFails = false;
   const frames = [];
   const micHass = {
     ...hass,
@@ -164,20 +199,28 @@ const result = await page.evaluate(async (replyUrl) => {
       subscribeMessage: async (cb, msg) => {
         const n = log.filter((l) => l.startsWith("sub")).length + 1;
         log.push(`sub${n}:${msg.start_stage}`);
+        if (subFails) throw { code: "pipeline-not-found", message: "Pipeline not found" };
         emit = cb;
         return async () => log.push(`unsub${n}`);
       },
     },
   };
   // RMS ~0.002, below the speech threshold
-  const feed = (seconds) => {
+  const feed = (seconds, from = worklet) => {
     for (let i = 0; i < seconds * 16000; i += 2048) {
-      worklet.port.onmessage({ data: Float32Array.from({ length: 2048 }, () => (Math.random() - 0.5) * 0.007) });
+      from.port.onmessage?.({ data: Float32Array.from({ length: 2048 }, () => (Math.random() - 0.5) * 0.007) });
     }
   };
   const tick = () => new Promise((r) => setTimeout(r, 50));
   const runStart = () => emit({ type: "run-start", data: { runner_data: { stt_binary_handler_id: 1 } } });
-  const mic = async (scenario) => {
+  const typeRequest = async (q, el) => {
+    q(".kbd").click();
+    await el.updateComplete;
+    q("input[name=q]").value = "turn on the lights";
+    q("form.type").requestSubmit();
+  };
+  // `before` runs ahead of the tap; `live` is read once the scenario is over, `afterDetach` once the card is removed
+  const mic = async (scenario, before = () => {}) => {
     log.length = 0;
     frames.length = 0;
     const cell = document.body.appendChild(document.createElement("div"));
@@ -188,13 +231,30 @@ const result = await page.evaluate(async (replyUrl) => {
     cell.appendChild(el);
     await el.updateComplete;
     const q = (s) => el.shadowRoot.querySelector(s);
+    before();
     q(".orb").click();
     await tick();
-    await scenario(q, el);
+    const extra = await scenario(q, el);
     await tick();
-    const r = { status: q(".sub").textContent, log: [...log], ends: frames.filter((f) => f === 1).length, audio: frames.filter((f) => f > 1).length };
+    const r = { ...extra, status: q(".sub").textContent, log: [...log], ends: frames.filter((f) => f === 1).length, audio: frames.filter((f) => f > 1).length, live: live() };
     cell.remove();
+    await tick();
+    r.afterDetach = live();
     return r;
+  };
+  // a tap whose microphone is still opening (permission prompt) when the scenario acts; the prompt is answered after
+  const opening = (act) => {
+    let answer;
+    return [
+      async (q, el) => {
+        await act(q, el);
+        await tick();
+        answer();
+        gate = null;
+        await tick();
+      },
+      () => (gate = new Promise((r) => (answer = r))),
+    ];
   };
   out.mic = {
     silence: await mic(async () => { runStart(); feed(7.2); }),
@@ -202,14 +262,41 @@ const result = await page.evaluate(async (replyUrl) => {
     typed: await mic(async (q, el) => {
       runStart();
       feed(1);
-      q(".kbd").click();
-      await el.updateComplete;
-      q("input[name=q]").value = "turn on the lights";
-      q("form.type").requestSubmit();
+      await typeRequest(q, el);
     }),
     tapEarly: await mic(async (q) => { feed(0.5); q(".orb").click(); await tick(); runStart(); }),
+    // the first tap's recorder must not feed the second run: each earlier tap would add a copy of the audio
+    secondTap: await mic(async (q) => {
+      contexts = 0;
+      runStart();
+      feed(1);
+      q(".orb").click();
+      emit({ type: "run-end", data: {} });
+      await tick();
+      const first = worklet;
+      q(".orb").click();
+      await tick();
+      runStart();
+      frames.length = 0;
+      feed(1, first);
+      const stale = frames.filter((f) => f > 1).length;
+      feed(1);
+      return { stale, fresh: frames.filter((f) => f > 1).length - stale, contexts, during: live() };
+    }),
+    // the run fails to start: the microphone it opened is released
+    runFails: await mic(async () => { subFails = false; }, () => (subFails = true)),
+    // removed from the page mid-sentence
+    detached: await mic(async (q, el) => {
+      runStart();
+      feed(1);
+      el.remove();
+      await tick();
+    }),
+    // tapped again before the microphone opened: cancelled, no run, nothing left open once the prompt is answered
+    tapWhileOpening: await mic(...opening((q) => q(".orb").click())),
+    // a typed request before the microphone opened: only the typed run goes ahead
+    typedWhileOpening: await mic(...opening(typeRequest)),
   };
-  out.mic.typed.track = track.readyState;
 
   // the reply scenario below drives this card from separate evaluate calls
   window.__smoke = { emit: (e) => emit(e), log, micHass, tick };
@@ -333,6 +420,11 @@ for (const v of result.voice) {
   if (Math.abs(v.css / v.buffer - 1) > 0.02) fail.push(`${at}: visualizer drawn at ${v.buffer.toFixed(2)} for a ${v.css.toFixed(2)} box, not round`);
   if (v.after === v.status) fail.push(`${at}: retry did not clear the error`);
 }
+if (result.longText.status !== "Tap to talk") fail.push(`voice long text: status "${result.longText.status}", expected idle "Tap to talk"`);
+for (const k of ["heard", "reply"]) {
+  const t = result.longText[k];
+  if (t.out || t.lines > 2) fail.push(`voice long ${k} in the 374x184 panel cell: ${t.lines} lines${t.out ? ", outside the card" : ""}, expected at most 2 inside`);
+}
 const { silence, tapQuiet, typed, tapEarly } = result.mic;
 if (silence.status !== "Didn't catch that") fail.push(`mic silence: status "${silence.status}", expected "Didn't catch that"`);
 if (silence.ends) fail.push("mic silence: sent end-of-audio, so speech-to-text would transcribe the noise");
@@ -340,10 +432,27 @@ if (!silence.log.includes("unsub1")) fail.push("mic silence: run not unsubscribe
 if (tapQuiet.ends !== 1) fail.push(`mic tap stop with quiet audio: ${tapQuiet.ends} end-of-audio frames, expected 1`);
 if (!tapQuiet.audio) fail.push("mic tap stop with quiet audio: no audio sent");
 const order = (l) => typed.log.indexOf(l);
-if (typed.track !== "ended") fail.push("mic typed while listening: microphone track still live");
 if (!(order("track-stop") >= 0 && order("unsub1") > order("track-stop") && order("sub2:intent") > order("unsub1")))
   fail.push(`mic typed while listening: expected track-stop, unsub1, sub2:intent; got ${typed.log.join(", ")}`);
 if (tapEarly.ends !== 1) fail.push(`mic tap stop before run-start: ${tapEarly.ends} end-of-audio frames, expected 1`);
+const { secondTap } = result.mic;
+if (secondTap.stale) fail.push(`mic second tap: the first tap's recorder sent ${secondTap.stale} frames into the second run, garbling it`);
+if (!secondTap.fresh) fail.push("mic second tap: the second run sent no audio");
+if (secondTap.contexts !== 0) fail.push(`mic second tap: ${secondTap.contexts} new AudioContext(s) on the second tap, expected the card's first one reused`);
+// the microphone lifecycle: at most one live capture, released on every way out (stop, error, typed, detach, cancel)
+const held = (l) => `${l.tracks} microphone track(s) and ${l.recorders} recorder(s) live`;
+for (const [name, r] of Object.entries(result.mic)) {
+  const listening = name === "secondTap";
+  if (listening ? r.live.tracks !== 1 || r.live.recorders !== 1 : r.live.tracks || r.live.recorders) fail.push(`mic ${name}: ${held(r.live)} at the end, expected ${listening ? "exactly one of each" : "none"}`);
+  if (r.afterDetach.tracks || r.afterDetach.recorders) fail.push(`mic ${name}: ${held(r.afterDetach)} after the card was removed`);
+}
+const { runFails, detached: micDetached, tapWhileOpening: tapOpen, typedWhileOpening: typedOpen } = result.mic;
+if (!runFails.log.includes("sub1:stt") || !runFails.status) fail.push(`mic run fails to start: log ${runFails.log.join(", ")}, status "${runFails.status}"`);
+if (!micDetached.log.includes("unsub1")) fail.push("mic detached while listening: run not unsubscribed");
+if (micDetached.status !== "Tap to talk") fail.push(`mic detached while listening: shows "${micDetached.status}" with no run behind it, expected "Tap to talk"`);
+// the microphone granted after the cancel is stopped at once ("track-stop") and never starts a run
+if (tapOpen.log.join() !== "track-stop" || tapOpen.status !== "Tap to talk") fail.push(`mic tap while opening: expected only track-stop and "Tap to talk", got ${tapOpen.log.join(", ")} / "${tapOpen.status}"`);
+if (typedOpen.log.join() !== "sub1:intent,track-stop") fail.push(`mic typed while opening: expected the typed run, then the late microphone stopped; got ${typedOpen.log.join(", ")}`);
 const { reply } = result;
 if (reply.playing !== "Responding") fail.push(`voice reply: status "${reply.playing}" while the reply plays, expected "Responding"`);
 if (reply.status !== "Couldn't speak the reply" || reply.settledAfter > 9) fail.push(`voice reply: status "${reply.status}" ${reply.settledAfter} s after a playing reply stopped advancing (expected "Couldn't speak the reply" after about 6 s)`);
@@ -364,4 +473,4 @@ if (fail.length) {
   console.error(`WebKit smoke FAILED:\n- ${fail.join("\n- ")}`);
   process.exit(1);
 }
-console.log("WebKit smoke passed: 5 cards defined and rendered, clock round, hidden photo card idle, voice error contained and round, mic flows end runs, stalled reply stopped and retried, slow reply waits, detached reply ends quietly");
+console.log("WebKit smoke passed: 5 cards defined and rendered, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly");
