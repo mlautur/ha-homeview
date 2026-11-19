@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  clampStep, defaultSide, fromFormList, handAngles, isActive, listImages, mediaFolders, nowIn, phaseAfter, satellitePhase, setpoints, shuffled, tapService, toFormList, voiceError, within,
+  clampStep, defaultSide, fromFormList, handAngles, isActive, listImages, mediaFolders, nowIn, phaseAfter, satellitePhase, setpoints, shuffled, tapService, toFormList, voiceError, within, gestureOf, ShownHistory,
 } from "../src/logic.ts";
 
 const climate = (attributes: Record<string, unknown>, state = "heat") => ({ entity_id: "climate.x", state, attributes });
@@ -129,6 +129,44 @@ test("photo: a websocket answer that never comes fails after the limit instead o
   assert.deepEqual(await listImages(lossy, ["a", "b"], false), ["b/1.jpg"]);
   calls = 0;
   await assert.rejects(listImages(lossy, ["a"], false), /did not answer/);
+});
+
+test("photo: a gesture is a tap, a clear swipe on one axis, or nothing", () => {
+  assert.equal(gestureOf(3, -4, 120), "tap");
+  assert.equal(gestureOf(3, -4, 900), null, "a long press is not a tap");
+  assert.equal(gestureOf(-120, 10, 300), "left");
+  assert.equal(gestureOf(120, -20, 300), "right");
+  assert.equal(gestureOf(-40, 0, 40), "left", "a short quick flick counts");
+  assert.equal(gestureOf(-40, 0, 400), null, "a short slow drag does not");
+  assert.equal(gestureOf(-80, -75, 200), null, "a diagonal is neither");
+  assert.equal(gestureOf(5, 140, 300), "down");
+  assert.equal(gestureOf(0, -140, 300), "up");
+  assert.equal(gestureOf(10, 60, 600), null, "a short slow pull down does not close");
+});
+
+test("photo: history retraces shuffled pictures back and then forward before new ones", () => {
+  const h = new ShownHistory<string>(3);
+  assert.equal(h.peek(-1), undefined);
+  for (const id of ["a", "b", "c"]) h.push(id);
+  assert.equal(h.step(-1), "b");
+  assert.equal(h.step(-1), "a");
+  assert.equal(h.step(-1), undefined, "nothing before the first picture");
+  assert.equal(h.peek(1), "b");
+  assert.equal(h.step(1), "b");
+  h.push("d"); // a new picture after going back replaces what was ahead
+  assert.equal(h.peek(1), undefined);
+  assert.equal(h.step(-1), "b");
+  h.step(1);
+  h.push("e");
+  h.push("f"); // capped at 3: "a" and "b" fall off
+  assert.equal(h.step(-1), "e");
+  assert.equal(h.step(-1), "d");
+  assert.equal(h.step(-1), undefined);
+  h.drop("d");
+  assert.equal(h.peek(1), "e");
+  h.clear();
+  assert.equal(h.peek(-1), undefined);
+  assert.equal(h.peek(1), undefined);
 });
 
 test("editor: a list field shows as a list and saves one value as a plain string", () => {

@@ -12,6 +12,9 @@
 // or if a reply whose first audio is slow to arrive (slow TTS or agent) is given up before it plays.
 // or if a photo frame whose Home Assistant answers are lost (a tablet's Wi-Fi drops, or it sleeps, mid-request)
 // stays empty instead of giving up on the lost answer and trying again.
+// or if swiping the photo frame does not step to the next / previous picture (retracing a shuffled order),
+// or a vertical drag changes it, or a tap does not open a full-screen slideshow that covers the screen,
+// swipes along with the card, and closes on a swipe down, on Escape and by itself after fullscreen_hours.
 // One-time setup: npx playwright-core install webkit. Run: npm run test:webkit
 import { readFileSync } from "node:fs";
 import http from "node:http";
@@ -454,6 +457,132 @@ result.lostAnswers.at35s = await frame();
 await photoPage.clock.runFor(10000); // retried 10 s later; that picture's resolve is lost too
 await photoPage.clock.runFor(31000); // ...and gives up at 30 s, so the next picture shows
 result.lostAnswers.at76s = await frame();
+
+// gestures: swipe left / right on the card, tap for the full-screen slideshow, swipe in it, close it.
+// Synthetic pointer events (headless WebKit has no touch input); fake clock for the timers.
+const gesturePage = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true });
+gesturePage.on("pageerror", (e) => errors.push(e.message));
+await gesturePage.clock.install();
+await gesturePage.route("https://homeview.test/", (r) => r.fulfill({ contentType: "text/html", body: "<!doctype html><meta name=viewport content=\'width=device-width\'><body style='margin:0;background:#888'></body>" }));
+await gesturePage.goto("https://homeview.test/");
+await gesturePage.addScriptTag({
+  content: `customElements.define("ha-card", class extends HTMLElement {
+    constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = "<style>:host{display:block}</style><slot></slot>"; }
+  });`,
+});
+await gesturePage.addScriptTag({ type: "module", content: bundle });
+await gesturePage.evaluate(async () => {
+  await customElements.whenDefined("homeview-photo-card");
+  // one solid-colour picture per media id, so the shown picture tells which item it is
+  const ids = ["a", "b", "c", "d", "e"];
+  const urls = Object.fromEntries(ids.map((id, i) => {
+    const c = document.createElement("canvas");
+    c.width = c.height = 8;
+    const g = c.getContext("2d");
+    g.fillStyle = `hsl(${i * 70} 70% 50%)`;
+    g.fillRect(0, 0, 8, 8);
+    return [id, c.toDataURL()];
+  }));
+  const byUrl = Object.fromEntries(Object.entries(urls).map(([k, v]) => [v, k]));
+  const hass = {
+    states: {}, entities: {}, devices: {}, areas: {}, config: { unit_system: { temperature: "°F" } },
+    callService: async () => {}, connection: { subscribeMessage: async () => () => {} }, hassUrl: (p) => p,
+    callWS: async (m) => {
+      if (m.type === "media_source/browse_media") return { children: ids.map((id) => ({ media_class: "image", media_content_type: "image/png", media_content_id: id, can_expand: false })) };
+      if (m.type === "media_source/resolve_media") return { url: urls[m.media_content_id] };
+      return {};
+    },
+  };
+  const make = (config) => {
+    const cell = document.body.appendChild(document.createElement("div"));
+    cell.style.cssText = "width:358px;height:376px;margin:8px";
+    const el = document.createElement("homeview-photo-card");
+    el.setConfig({ media: "media-source://media_source/local", interval: 30, shuffle: true, ...config });
+    el.hass = hass;
+    cell.appendChild(el);
+    return el;
+  };
+  const cards = [make({}), make({ fullscreen_hours: 0.5 })];
+  const show = () => document.querySelector("homeview-photo-slideshow");
+  // a pointer gesture from the middle of `target` by (dx, dy)
+  const gesture = (target, dx, dy) => {
+    const r = target.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    const ev = (type, px, py) => target.dispatchEvent(new PointerEvent(type, { pointerId: 7, pointerType: "touch", isPrimary: true, clientX: px, clientY: py, bubbles: true, composed: true }));
+    ev("pointerdown", x, y);
+    for (let i = 1; i <= 6; i++) ev("pointermove", x + (dx * i) / 6, y + (dy * i) / 6);
+    ev("pointerup", x + dx, y + dy);
+  };
+  window.__g = {
+    card: (n) => cards[n].shadowRoot.querySelector("ha-card"),
+    shown: (n) => byUrl[cards[n].shadowRoot.querySelector("img.front")?.getAttribute("src")] ?? "",
+    swipe: (n, dx, dy = 0) => gesture(window.__g.card(n), dx, dy),
+    tap: (n) => gesture(window.__g.card(n), 0, 0),
+    slideshow: () => {
+      const s = show();
+      if (!s) return null;
+      const r = s.getBoundingClientRect();
+      return { covers: r.left === 0 && r.top === 0 && r.width === innerWidth && r.height === innerHeight, box: [r.width, r.height, innerWidth, innerHeight].map(Math.round), shown: byUrl[s.shadowRoot.querySelector(".stage img.front")?.getAttribute("src")] ?? "" };
+    },
+    swipeSlideshow: (dx, dy) => gesture(show(), dx, dy),
+  };
+});
+const g = (fn, ...args) => gesturePage.evaluate(([fn, args]) => window.__g[fn](...args), [fn, args]);
+const settle = async (ms = 1000) => {
+  await gesturePage.clock.runFor(ms);
+  await gesturePage.waitForTimeout(150); // real time for decoding and rendering
+};
+const gs = (result.gestures = {});
+await settle(2000);
+gs.first = await g("shown", 0);
+await g("swipe", 0, -200);
+await settle();
+gs.afterLeft = await g("shown", 0);
+await g("swipe", 0, 200);
+await settle();
+gs.afterRight = await g("shown", 0);
+await g("swipe", 0, 200); // nothing before the first picture: it settles back
+await settle();
+gs.beforeFirst = await g("shown", 0);
+await g("swipe", 0, 0, -200);
+await settle();
+gs.afterVertical = await g("shown", 0);
+await g("swipe", 0, -200);
+await settle();
+gs.second = await g("shown", 0);
+await settle(25000); // a swipe restarts the 30 s picture time
+gs.at26s = await g("shown", 0);
+await settle(6000);
+gs.at32s = await g("shown", 0);
+await g("tap", 0);
+await settle(500);
+gs.open = await g("slideshow");
+gs.cardAtOpen = await g("shown", 0);
+await g("swipeSlideshow", -200, 0);
+await settle();
+gs.openAfterLeft = await g("slideshow");
+gs.cardAfterLeft = await g("shown", 0);
+await g("swipeSlideshow", 0, 200);
+await settle();
+gs.afterSwipeDown = await g("slideshow");
+await g("tap", 0);
+await settle(500);
+gs.reopened = !!(await g("slideshow"));
+await gesturePage.keyboard.press("Escape");
+await settle();
+gs.afterEscape = await g("slideshow");
+await g("tap", 0);
+await settle(500);
+await settle(3 * 3600 * 1000 - 5000);
+gs.before3h = !!(await g("slideshow"));
+await settle(6000);
+gs.after3h = !!(await g("slideshow"));
+await g("tap", 1);
+await settle(500);
+await settle(30 * 60 * 1000 - 5000);
+gs.before30m = !!(await g("slideshow"));
+await settle(6000);
+gs.after30m = !!(await g("slideshow"));
 await browser.close();
 tts.closeAllConnections();
 tts.close();
@@ -529,8 +658,25 @@ if (la.at5s.picture) fail.push("photo lost answers: a picture showed before any 
 if (!/did not answer/.test(la.at35s.msg)) fail.push(`photo lost answers: 35 s after a folder list that never answered the frame says "${la.at35s.msg}", expected that Home Assistant did not answer`);
 if (!la.at76s.picture || la.at76s.msg) fail.push(`photo lost answers: the frame is still empty (${JSON.stringify(la.at76s)}) after a lost folder list and a lost picture, expected a retry to show a picture`);
 console.log(JSON.stringify(la));
+// (gs: result.gestures, set above)
+if (!gs.first) fail.push("photo gestures: no picture shown");
+if (!gs.afterLeft || gs.afterLeft === gs.first) fail.push(`photo gestures: a swipe left kept "${gs.first}", expected the next picture`);
+if (gs.afterRight !== gs.first) fail.push(`photo gestures: a swipe right shows "${gs.afterRight}", expected the previous picture "${gs.first}" (shuffled)`);
+if (gs.beforeFirst !== gs.first) fail.push(`photo gestures: a swipe right on the first picture changed it to "${gs.beforeFirst}"`);
+if (gs.afterVertical !== gs.first) fail.push(`photo gestures: a vertical drag changed the picture to "${gs.afterVertical}"`);
+if (gs.second !== gs.afterLeft) fail.push(`photo gestures: next after going back shows "${gs.second}", expected "${gs.afterLeft}" again from the history`);
+if (gs.at26s !== gs.second) fail.push("photo gestures: the timed change came less than 30 s after a swipe");
+if (gs.at32s === gs.second) fail.push("photo gestures: no timed change 30 s after a swipe");
+if (!gs.open?.covers) fail.push(`photo slideshow: a tap did not open a full-screen slideshow (${JSON.stringify(gs.open)})`);
+if (gs.open && gs.open.shown !== gs.cardAtOpen) fail.push(`photo slideshow: opened on "${gs.open.shown}", expected the card's picture "${gs.cardAtOpen}"`);
+if (!gs.openAfterLeft || gs.openAfterLeft.shown === gs.open?.shown || gs.openAfterLeft.shown !== gs.cardAfterLeft) fail.push(`photo slideshow: a swipe left did not step the slideshow and the card together (${JSON.stringify([gs.openAfterLeft, gs.cardAfterLeft])})`);
+if (gs.afterSwipeDown) fail.push("photo slideshow: still open after a swipe down");
+if (!gs.reopened || gs.afterEscape) fail.push("photo slideshow: Escape did not close it");
+if (!gs.before3h || gs.after3h) fail.push(`photo slideshow: expected it open until 3 h and closed after (open before: ${gs.before3h}, after: ${gs.after3h})`);
+if (!gs.before30m || gs.after30m) fail.push(`photo slideshow: fullscreen_hours 0.5 expected it open until 30 min and closed after (before: ${gs.before30m}, after: ${gs.after30m})`);
+console.log(JSON.stringify(gs));
 if (fail.length) {
   console.error(`WebKit smoke FAILED:\n- ${fail.join("\n- ")}`);
   process.exit(1);
 }
-console.log("WebKit smoke passed: 5 cards defined and rendered, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly, photo frame recovers from lost answers");
+console.log("WebKit smoke passed: 5 cards defined and rendered, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly, photo frame recovers from lost answers, swipes and opens / closes its full-screen slideshow");

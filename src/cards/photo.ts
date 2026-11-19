@@ -2,12 +2,17 @@
  * HomeView photo frame: a slideshow of the pictures in a Home Assistant media
  * source folder (local media, a DLNA / Synology / Immich server, ... anything
  * HA's Media panel can browse), read over the media_source websocket API.
+ * Swipe left / right for the next / previous picture; tap for a full-screen slideshow.
  */
 import { css, html, nothing, type PropertyValues, type TemplateResult } from "lit";
 import { HomeViewCard, glassStyles, type BaseConfig } from "./base.ts";
 import { registerCard, type GridOptions } from "../ha.ts";
 import type { EditorField } from "../editor.ts";
-import { listImages, mediaFolders, shuffled, within } from "../logic.ts";
+import { ShownHistory, listImages, mediaFolders, shuffled, within, type Gesture } from "../logic.ts";
+import { trackGestures } from "../util/gesture.ts";
+import { inDialog } from "../glass/backdrop.ts";
+import { SLIDE_MS, emptyStage, stage, stageStyles, type StageState } from "./photo-stage.ts";
+import { HomeViewPhotoSlideshow, type SlideshowHost } from "./photo-fullscreen.ts";
 
 export interface PhotoConfig extends BaseConfig {
   /** one media-source folder, or a list of them: the slideshow cycles through all */
@@ -16,33 +21,49 @@ export interface PhotoConfig extends BaseConfig {
   shuffle?: boolean;
   recursive?: boolean;
   fit?: "cover" | "contain";
+  /** the full-screen slideshow (tap a picture) closes by itself after this many hours */
+  fullscreen_hours?: number;
 }
-
 
 const RELIST_MS = 30 * 60 * 1000;
 /** longest wait for one websocket answer or one picture; a normal browse of a 1,500-photo album takes under 1 s */
 const ANSWER_MS = 30 * 1000;
 /** a folder list that failed is tried again after 10 s, doubling up to 5 min */
 const retryMs = (failures: number): number => Math.min(5 * 60 * 1000, 10 * 1000 * 2 ** failures);
+/** resolved picture URLs are signed for an hour (expires: 3600); resolve again before that */
+const URL_TTL_MS = 50 * 60 * 1000;
 
+/** a picture: its media id, and once fetched, its URL (decoded and ready to show) */
+interface Picture {
+  id: string;
+  url?: string;
+  at?: number;
+  ready?: boolean;
+}
 
-/** Collect image ids under a media-source folder (breadth first, bounded). */
-
-
-export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
-  static properties = { ...HomeViewCard.properties, _urls: { state: true }, _front: { state: true }, _error: { state: true } };
-  private _urls: [string, string] = ["", ""];
-  private _front = 0;
+export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> implements SlideshowHost {
+  static properties = { ...HomeViewCard.properties, _stage: { state: true }, _error: { state: true } };
+  private _stage: StageState = emptyStage();
   private _error = "";
   private items: string[] = [];
   private index = -1;
   private timer = 0;
+  private settleTimer = 0;
   private listedAt = 0;
   private fails = 0;
   private parked = false;
   private loadedFor = "";
   private listRun = 0;
   private listFails = 0;
+  /** what has been shown, so "previous" retraces it even when shuffled */
+  private shown = new ShownHistory<Picture>();
+  /** the next unseen picture, fetched ahead so the timed change and a swipe to it are instant */
+  private ahead?: Picture;
+  /** the newest picture change; an older one still loading gives way to it */
+  private nav = 0;
+  private dragging = false;
+  private untrack?: () => void;
+  private slideshow?: HomeViewPhotoSlideshow;
 
   static editorFields: EditorField[] = [
     { name: "media", label: "Media folders", required: true, list: true, helper: "One or more media-source folders, e.g. media-source://media_source/local/photos; the slideshow cycles through all of them. Open Media in the sidebar to find a folder; DLNA, Synology Photos and other media servers HA can browse work too.", selector: { text: { multiple: true } } },
@@ -50,6 +71,7 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
     { name: "shuffle", selector: { boolean: {} } },
     { name: "recursive", label: "Include subfolders", selector: { boolean: {} } },
     { name: "fit", selector: { select: { mode: "dropdown", options: [{ value: "cover", label: "Fill" }, { value: "contain", label: "Fit whole picture" }] } } },
+    { name: "fullscreen_hours", label: "Full-screen slideshow closes after", helper: "Tap a picture for a full-screen slideshow. Swipe down to close it; otherwise it closes by itself after this long (3 hours by default).", selector: { number: { min: 0.5, max: 24, step: 0.5, mode: "box", unit_of_measurement: "h" } } },
   ];
 
   static getStubConfig(): Partial<PhotoConfig> {
@@ -59,6 +81,8 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
   protected validate(config: PhotoConfig): void {
     const folders = mediaFolders(config.media);
     if (!folders.length || folders.some((m) => !m.startsWith("media-source://"))) throw new Error("Set media to a media-source:// folder, or a list of them");
+    const h = config.fullscreen_hours;
+    if (h !== undefined && !(typeof h === "number" && h > 0)) throw new Error("Set fullscreen_hours to a number of hours above 0");
   }
 
   getGridOptions(): GridOptions {
@@ -69,6 +93,7 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
     super.disconnectedCallback();
     clearTimeout(this.timer);
     this.loadedFor = "";
+    this.slideshow?.close(); // the dashboard moved on (another view, or the card was removed)
   }
 
   connectedCallback(): void {
@@ -76,8 +101,16 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
     if (this.hass && this._config) this.requestUpdate();
   }
 
+  protected firstUpdated(changed: PropertyValues): void {
+    super.firstUpdated(changed);
+    const card = this.renderRoot.querySelector<HTMLElement>("ha-card");
+    if (!card || this.untrack) return;
+    this.untrack = trackGestures(card, { move: (dx) => this.dragTo(dx), end: (g) => (g === "tap" ? this.openSlideshow() : this.dragEnd(g)) }, false);
+  }
+
   protected updated(changed: PropertyValues): void {
     super.updated?.(changed);
+    if (this.slideshow) this.slideshow.state = this._stage;
     this.load();
   }
 
@@ -108,11 +141,13 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
       this._error = ids.length ? "" : "No pictures in this folder";
       if (restart) {
         this.index = -1;
-        void this.next();
+        this.shown.clear();
+        this.ahead = undefined;
+        void this.advance();
       }
     } catch (e) {
       if (run !== this.listRun) return;
-      // a periodic relist that fails keeps the pictures it has; next() tries again on the following picture
+      // a periodic relist that fails keeps the pictures it has; the next timed change tries again
       if (!restart) return;
       // Home Assistant rejects with {code, message}, or {error: {code, message}} when the connection drops
       const err = e as { message?: string; error?: { message?: string } };
@@ -125,47 +160,204 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
     }
   }
 
-  private async next(): Promise<void> {
+  /** the timed change to the next picture */
+  private async advance(): Promise<void> {
     clearTimeout(this.timer);
-    const c = this._config;
-    if (!c || !this.items.length || !this.isConnected) return;
-    // hidden (another screen size's section): fetch nothing until resume()
-    this.parked = !this.onScreen;
+    if (!this._config || !this.items.length || !this.isConnected) return;
+    // hidden (another screen size's section) and not full screen: fetch nothing until resume()
+    this.parked = !this.onScreen && !this.slideshow;
     if (this.parked) return;
+    const nav = this.nav;
     if (Date.now() - this.listedAt > RELIST_MS) await this.relist(false);
-    this.index = (this.index + 1) % this.items.length;
-    try {
-      const r = await within(this.hass!.callWS<{ url: string }>({ type: "media_source/resolve_media", media_content_id: this.items[this.index], expires: 3600 }), ANSWER_MS);
-      const url = r.url.startsWith("http") ? r.url : this.hass!.hassUrl(r.url);
-      const img = new Image();
-      img.src = url;
-      await within(img.decode(), ANSWER_MS); // swap only once the next picture is ready
-      const back = 1 - this._front;
-      const urls: [string, string] = [...this._urls] as [string, string];
-      urls[back] = url;
-      this._urls = urls;
-      this._front = back;
-      this.fails = 0;
-    } catch {
-      this.fails++;
-    }
-    // A picture this browser cannot decode (HEIC outside Safari, a broken file) is skipped
-    // at once instead of holding the previous one, or a blank frame, for a whole interval.
-    // After a run of failures, wait the interval so an unreadable folder does not spin.
-    const skip = this.fails > 0 && this.fails < Math.min(this.items.length, 20);
-    this.timer = window.setTimeout(() => void this.next(), skip ? 0 : Math.max(5, c.interval ?? 30) * 1000);
+    if (nav === this.nav) await this.go(1, false);
   }
 
+  private schedule(): void {
+    clearTimeout(this.timer);
+    if (!this._config || !this.isConnected) return;
+    this.timer = window.setTimeout(() => void this.advance(), Math.max(5, this._config.interval ?? 30) * 1000);
+  }
+
+  /** the next unseen picture */
+  private unseen(): Picture | undefined {
+    if (!this.items.length) return undefined;
+    const id = this.items[(this.index + 1) % this.items.length];
+    return this.ahead?.id === id ? this.ahead : { id };
+  }
+
+  /** resolve (or reuse) a picture's URL and decode it, so it can be swapped in at once */
+  private async fetch(p: Picture): Promise<string> {
+    if (!p.url || Date.now() - (p.at ?? 0) > URL_TTL_MS) {
+      p.ready = false;
+      const r = await within(this.hass!.callWS<{ url: string }>({ type: "media_source/resolve_media", media_content_id: p.id, expires: 3600 }), ANSWER_MS);
+      p.url = r.url.startsWith("http") ? r.url : this.hass!.hassUrl(r.url);
+      p.at = Date.now();
+    }
+    const img = new Image();
+    img.src = p.url;
+    await within(img.decode(), ANSWER_MS);
+    p.ready = true;
+    return p.url;
+  }
+
+  /** fetch the picture after the current one ahead of time */
+  private async prefetch(): Promise<void> {
+    const p = this.shown.peek(1) ?? (this.ahead = this.unseen());
+    if (!p || p.ready) return;
+    try {
+      await this.fetch(p);
+    } catch {
+      // the change to it fetches it again, and skips it if it still fails
+    }
+  }
+
+  /** change to the picture one step forward or back: the history first, else the next unseen one */
+  private async go(dir: 1 | -1, slide: boolean): Promise<void> {
+    const nav = ++this.nav;
+    clearTimeout(this.timer);
+    for (;;) {
+      const fromHistory = this.shown.peek(dir);
+      const p = fromHistory ?? (dir > 0 ? this.unseen() : undefined);
+      if (!p) break; // nothing before the first picture shown
+      if (!fromHistory) this.index = (this.index + 1) % this.items.length;
+      try {
+        const url = await this.fetch(p);
+        if (nav !== this.nav) return;
+        if (fromHistory) this.shown.step(dir);
+        else this.shown.push(p);
+        if (p === this.ahead) this.ahead = undefined;
+        this.fails = 0;
+        await this.show(url, slide ? dir : 0);
+        void this.prefetch();
+        break;
+      } catch {
+        if (nav !== this.nav) return;
+        if (p === this.ahead) this.ahead = undefined;
+        if (fromHistory) this.shown.drop(p);
+        // A picture this browser cannot decode (HEIC outside Safari, a broken file) is skipped at once
+        // instead of holding the previous one, or a blank frame, for a whole interval.
+        // After a run of failures, wait the interval so an unreadable folder does not spin.
+        if (++this.fails >= Math.min(this.items.length, 20)) break;
+      }
+    }
+    this.settle();
+    this.schedule();
+  }
+
+  /** swap in a fetched picture: a crossfade for the timed slideshow, a slide (dir 1 from the right, -1 from the left) for a swipe */
+  private async show(url: string, dir: number): Promise<void> {
+    clearTimeout(this.settleTimer);
+    const s = this._stage;
+    const back = 1 - s.front;
+    const urls: [string, string] = [...s.urls];
+    urls[back] = url;
+    if (!dir) {
+      this._stage = { urls, front: back, drag: 0, side: 0, still: false };
+      return;
+    }
+    if (s.urls[back] !== url || s.side !== dir) {
+      // not peeking in yet (an arrow key, or nothing was ready during the drag): place it beside first
+      this._stage = { ...s, urls, side: dir, still: true };
+      await this.painted();
+    }
+    this._stage = { urls, front: back, drag: 0, side: -dir, still: false };
+  }
+
+  /** a drag or slide is over: the picture beside the shown one goes away once it has moved off */
+  private settle(): void {
+    const s = this._stage;
+    if (!s.drag && !s.side) return;
+    clearTimeout(this.settleTimer);
+    this._stage = { ...s, drag: 0, still: false };
+    this.settleTimer = window.setTimeout(() => (this._stage = { ...this._stage, side: 0, still: true }), SLIDE_MS + 60);
+  }
+
+  /** render, and make the browser take in the new positions before they change again */
+  private async painted(): Promise<void> {
+    await this.updateComplete;
+    if (this.slideshow) {
+      this.slideshow.state = this._stage;
+      await this.slideshow.updateComplete;
+      this.slideshow.shadowRoot?.querySelector("img")?.getBoundingClientRect();
+    }
+    this.renderRoot.querySelector("img")?.getBoundingClientRect();
+  }
+
+  // ---- gestures (the card and its full-screen slideshow) ----
+
+  dragTo(dx: number): void {
+    if (!this.dragging) {
+      this.dragging = true;
+      this.nav++; // a change still loading gives way to the finger
+      clearTimeout(this.timer);
+      clearTimeout(this.settleTimer);
+    }
+    const dir = dx < 0 ? 1 : -1;
+    const next = this.shown.peek(dir) ?? (dir > 0 ? this.ahead : undefined);
+    const peek = next?.ready ? next.url! : "";
+    const s = this._stage;
+    const urls: [string, string] = [...s.urls];
+    if (peek) urls[1 - s.front] = peek;
+    // no picture that way (going back from the first one): the picture resists
+    const blocked = dir < 0 ? !this.shown.peek(-1) : this.items.length < 2;
+    this._stage = { ...s, urls, drag: blocked ? dx / 3 : dx, side: peek ? dir : 0, still: true };
+  }
+
+  dragEnd(g: Gesture): void {
+    if (!this.dragging) return;
+    this.dragging = false;
+    if (g === "left" || g === "right") {
+      void this.go(g === "left" ? 1 : -1, true);
+      return;
+    }
+    this.settle();
+    this.schedule();
+  }
+
+  step(dir: 1 | -1): void {
+    if (this.items.length) void this.go(dir, true);
+  }
+
+  private openSlideshow(): void {
+    // not from the card editor's preview: the slideshow would open under the editor dialog
+    if (this.slideshow || !this._stage.urls[this._stage.front] || inDialog(this)) return;
+    const el = document.createElement("homeview-photo-slideshow") as HomeViewPhotoSlideshow;
+    el.hours = this._config?.fullscreen_hours ?? 3;
+    el.host = this;
+    el.state = this._stage;
+    this.slideshow = el;
+    document.body.appendChild(el);
+  }
+
+  slideshowClosed(): void {
+    this.slideshow = undefined;
+    if (this.isConnected) this.renderRoot.querySelector<HTMLElement>("ha-card")?.focus({ preventScroll: true });
+  }
+
+  private onKey = (e: KeyboardEvent): void => {
+    if (e.key === "Enter" || e.key === " ") this.openSlideshow();
+    else if (e.key === "ArrowRight") this.step(1);
+    else if (e.key === "ArrowLeft") this.step(-1);
+    else return;
+    e.preventDefault();
+  };
+
   protected resume(): void {
-    if (!this.load() && this.parked) void this.next();
+    if (!this.load() && this.parked) void this.advance();
   }
 
   protected render(): TemplateResult {
     if (!this._config) return html``;
     const fit = this._config.fit ?? "cover";
-    return html`<ha-card class="photo ${this.square ? "square" : ""}">
-      ${this._urls.map((u, i) => (u ? html`<img class=${i === this._front ? "front" : ""} src=${u} alt="" style="object-fit:${fit}" />` : nothing))}
-      ${this._error ? html`<div class="msg">${this._error}</div>` : nothing}
+    const shown = !!this._stage.urls[this._stage.front];
+    return html`<ha-card
+      class="photo ${this.square ? "square" : ""} ${shown ? "shown" : ""}"
+      role=${shown ? "button" : nothing}
+      tabindex=${shown ? "0" : nothing}
+      aria-label=${shown ? "Photo frame: open the full-screen slideshow" : nothing}
+      @keydown=${this.onKey}
+    >
+      ${stage(this._stage, fit)} ${this._error ? html`<div class="msg">${this._error}</div>` : nothing}
     </ha-card>`;
   }
 
@@ -175,6 +367,7 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
 
   static styles = [
     glassStyles,
+    stageStyles,
     css`
       ha-card.photo {
         position: relative;
@@ -184,6 +377,15 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
         border-radius: var(--hv-radius, 24px);
         background: rgb(0 0 0 / 0.25);
         box-shadow: 0 calc(var(--hv-ref, 200px) * 0.03) calc(var(--hv-ref, 200px) * 0.09) rgb(40 30 20 / 0.18);
+        --hv-gap: 12px;
+        /* horizontal drags are ours (swipe), vertical ones still scroll the page */
+        touch-action: pan-y;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      ha-card.photo.shown {
+        cursor: pointer;
       }
       ha-card.photo.square {
         aspect-ratio: 1;
@@ -196,18 +398,6 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> {
         border-radius: inherit;
         box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 0.35);
         pointer-events: none;
-      }
-      img {
-        position: absolute;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-        display: block;
-        opacity: 0;
-        transition: opacity 1.2s ease;
-      }
-      img.front {
-        opacity: 1;
       }
       .msg {
         position: absolute;
