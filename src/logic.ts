@@ -130,6 +130,18 @@ export async function listImages(hass: Pick<Hass, "callWS">, roots: string | str
   return [...out];
 }
 
+/**
+ * Settle like `p`, or reject once `ms` pass without an answer. A websocket reply lost on a connection
+ * that died without closing (tablet Wi-Fi drop, sleep) never arrives, and Home Assistant's callWS has no timeout.
+ */
+export function within<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("Home Assistant did not answer")), ms);
+  });
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
+}
+
 /** Visual editor: show list fields (e.g. the photo card's media) as lists... */
 export function toFormList<T extends Record<string, unknown>>(config: T, names: string[]): T {
   const data: Record<string, unknown> = { ...config };

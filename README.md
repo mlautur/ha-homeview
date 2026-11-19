@@ -116,6 +116,8 @@ media:
 
 A listed folder that cannot be opened is skipped; the card shows an error only when none of them can be. A subfolder that cannot be opened still shows an error.
 
+A folder or picture that Home Assistant does not answer for within 30 s is treated as failed, so a request lost to a Wi-Fi drop or a sleeping tablet cannot leave the frame empty. When no folder could be listed, the card tries again after 10 s, then less often, up to every 5 minutes.
+
 To find a folder id:
 1. Open **Media** in the sidebar.
 2. Browse to the folder.
