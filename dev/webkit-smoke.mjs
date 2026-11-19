@@ -3,10 +3,24 @@
 // while rendering, if the clock face is not round in a cell taller than it is wide, if a
 // photo card in a hidden section browses the media server before it is shown, or if a failed
 // Assist run spills out of the voice card, stretches its visualizer or does not clear on retry, or
-// if a mic run (stubbed microphone) sends noise to speech-to-text, drops a tap-stop or leaves a run open.
+// if a mic run (stubbed microphone) sends noise to speech-to-text, drops a tap-stop or leaves a run open,
+// or if a spoken reply streamed without a length (as Home Assistant streams TTS) leaves the card stuck in
+// "Responding": headless WebKit reports it as playing but never advances it, like a stalled stream.
 // One-time setup: npx playwright-core install webkit. Run: npm run test:webkit
 import { readFileSync } from "node:fs";
+import http from "node:http";
 import { webkit } from "playwright-core";
+
+// dev/fixtures/silence.mp3: 1 s of silence (ffmpeg -f lavfi -i anullsrc=r=22050:cl=mono -t 1 -b:a 32k),
+// sent in chunks with no Content-Length, so the browser cannot know its duration
+const mp3 = readFileSync(new URL("fixtures/silence.mp3", import.meta.url));
+const tts = http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "audio/mpeg" });
+  res.write(mp3.subarray(0, 2000));
+  setTimeout(() => res.end(mp3.subarray(2000)), 100);
+});
+await new Promise((r) => tts.listen(0, "127.0.0.1", r));
+const replyUrl = `http://127.0.0.1:${tts.address().port}/api/tts_proxy/reply.mp3`;
 
 const bundle = readFileSync(new URL("../dist/homeview.js", import.meta.url), "utf8");
 const browser = await webkit.launch();
@@ -24,7 +38,7 @@ await page.addScriptTag({
 });
 await page.addScriptTag({ type: "module", content: bundle });
 
-const result = await page.evaluate(async () => {
+const result = await page.evaluate(async (replyUrl) => {
   const names = ["thermostat", "tile", "clock", "photo", "voice"].map((n) => `homeview-${n}-card`);
   await Promise.all(names.map((n) => customElements.whenDefined(n)));
   const state = (entity_id, state, attributes = {}) => ({ entity_id, state, attributes, last_changed: "", last_updated: "", context: { id: "" } });
@@ -191,9 +205,79 @@ const result = await page.evaluate(async () => {
     tapEarly: await mic(async (q) => { feed(0.5); q(".orb").click(); await tick(); runStart(); }),
   };
   out.mic.typed.track = track.readyState;
+
+  // the reply scenario below drives this card from separate evaluate calls
+  window.__smoke = { emit: (e) => emit(e), log, micHass, tick };
   return out;
 });
+
+// A spoken reply streamed without a length that never finishes playing: the card must give up and accept
+// taps. The reply events arrive in their own evaluate, which carries a user gesture as a real tap does, so
+// the browser lets the reply play (it stays at 0 s in headless WebKit, like a stalled stream).
+await page.evaluate(async () => {
+  const { micHass, log, tick } = window.__smoke;
+  log.length = 0;
+  const cell = document.body.appendChild(document.createElement("div"));
+  cell.style.cssText = "width:358px;height:184px;margin:8px";
+  const el = document.createElement("homeview-voice-card");
+  el.setConfig({ grid_options: { rows: 3 } });
+  el.hass = micHass;
+  cell.appendChild(el);
+  await el.updateComplete;
+  const q = (s) => el.shadowRoot.querySelector(s);
+  q(".kbd").click();
+  await el.updateComplete;
+  q("input[name=q]").value = "what time is it";
+  q("form.type").requestSubmit();
+  await tick();
+  window.__smoke.card = el;
+});
+await page.evaluate((replyUrl) => {
+  const { emit } = window.__smoke;
+  emit({ type: "run-start", data: { runner_data: {} } });
+  emit({ type: "intent-end", data: { intent_output: { response: { speech: { plain: { speech: "It is seven." } } } } } });
+  emit({ type: "tts-start", data: {} });
+  emit({ type: "tts-end", data: { tts_output: { url: replyUrl } } });
+  emit({ type: "run-end", data: null });
+}, replyUrl);
+result.reply = await page.evaluate(async () => {
+  const { card: el, log, tick } = window.__smoke;
+  const q = (s) => el.shadowRoot.querySelector(s);
+  await new Promise((r) => setTimeout(r, 1500));
+  const playing = q(".sub").textContent;
+  const t0 = performance.now();
+  while (q(".sub").textContent === "Responding" && performance.now() - t0 < 15000) await new Promise((r) => setTimeout(r, 250));
+  const settledAfter = +((performance.now() - t0) / 1000 + 1.5).toFixed(1);
+  const status = q(".sub").textContent;
+  q(".orb").click();
+  await tick();
+  return { playing, status, settledAfter, tapStarted: log.some((l) => /^sub\d+:stt$/.test(l)) };
+});
+// a typed request sent while a reply plays: the old reply's give-up must not reset the new run to idle
+await page.evaluate(async () => {
+  const { card: el, tick } = window.__smoke;
+  el.shadowRoot.querySelector(".orb").click(); // stop the listening run started above
+  await tick();
+});
+await page.evaluate((replyUrl) => {
+  const { emit } = window.__smoke;
+  emit({ type: "run-start", data: { runner_data: {} } });
+  emit({ type: "tts-end", data: { tts_output: { url: replyUrl } } });
+}, replyUrl);
+result.replyThenTyped = await page.evaluate(async () => {
+  const { card: el, tick } = window.__smoke;
+  const q = (s) => el.shadowRoot.querySelector(s);
+  await new Promise((r) => setTimeout(r, 1000));
+  const playing = q(".sub").textContent;
+  if (!q("input[name=q]")) { q(".kbd").click(); await el.updateComplete; }
+  q("input[name=q]").value = "and the date";
+  q("form.type").requestSubmit();
+  await tick();
+  await new Promise((r) => setTimeout(r, 7500));
+  return { playing, after: q(".sub").textContent };
+});
 await browser.close();
+tts.close();
 
 const fail = [];
 if (errors.length) fail.push(`page errors: ${errors.join(" | ")}`);
@@ -223,10 +307,18 @@ if (typed.track !== "ended") fail.push("mic typed while listening: microphone tr
 if (!(order("track-stop") >= 0 && order("unsub1") > order("track-stop") && order("sub2:intent") > order("unsub1")))
   fail.push(`mic typed while listening: expected track-stop, unsub1, sub2:intent; got ${typed.log.join(", ")}`);
 if (tapEarly.ends !== 1) fail.push(`mic tap stop before run-start: ${tapEarly.ends} end-of-audio frames, expected 1`);
+const { reply } = result;
+if (reply.playing !== "Responding") fail.push(`voice reply: status "${reply.playing}" while the reply plays, expected "Responding"`);
+if (reply.status === "Responding") fail.push(`voice reply: still "Responding" ${reply.settledAfter} s after a streamed reply stopped advancing`);
+if (!reply.tapStarted) fail.push("voice reply: tapping the orb after the reply did not start listening");
+const { replyThenTyped: rt } = result;
+if (rt.playing !== "Responding") fail.push(`voice reply then typed: status "${rt.playing}" while the second reply plays, expected "Responding"`);
+if (rt.after !== "Thinking") fail.push(`voice reply then typed: the new run shows "${rt.after}" after the old reply gave up, expected "Thinking"`);
 console.log(JSON.stringify(result.rendered));
 console.log(JSON.stringify(result.mic));
+console.log(JSON.stringify(result.reply), JSON.stringify(result.replyThenTyped));
 if (fail.length) {
   console.error(`WebKit smoke FAILED:\n- ${fail.join("\n- ")}`);
   process.exit(1);
 }
-console.log("WebKit smoke passed: 5 cards defined and rendered, clock round, hidden photo card idle, voice error contained and round, mic flows end runs");
+console.log("WebKit smoke passed: 5 cards defined and rendered, clock round, hidden photo card idle, voice error contained and round, mic flows end runs, stalled reply recovers");
