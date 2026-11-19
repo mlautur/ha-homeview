@@ -170,6 +170,7 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
     const abort = (this.abort = new AbortController());
     // listening from the tap: a second tap while the microphone opens cancels instead of opening another
     this._phase = "listening";
+    this.analyser = undefined;
     try {
       const mic = await openMic(ctx, abort.signal, (samples) => this.onAudio(samples));
       if (abort.signal.aborted) return mic.close();

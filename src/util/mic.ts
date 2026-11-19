@@ -15,11 +15,14 @@ export interface Mic {
 export async function openMic(ctx: AudioContext, signal: AbortSignal, onSamples: (samples: Float32Array) => void): Promise<Mic> {
   let stream: MediaStream | undefined;
   const stopTracks = () => stream?.getTracks().forEach((t) => t.stop());
+  const check = () => {
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+  };
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-    signal.throwIfAborted();
+    check();
     await ctx.resume(); // some browsers start contexts suspended
-    signal.throwIfAborted();
+    check();
     let closed = false;
     const push = (samples: Float32Array) => {
       if (!closed) onSamples(samples);
@@ -33,7 +36,7 @@ export async function openMic(ctx: AudioContext, signal: AbortSignal, onSamples:
       } finally {
         URL.revokeObjectURL(url);
       }
-      signal.throwIfAborted();
+      check();
       const worklet = new AudioWorkletNode(ctx, "homeview-recorder");
       worklet.port.onmessage = (e: MessageEvent<Float32Array>) => push(e.data);
       detach = () => (worklet.port.onmessage = null);
