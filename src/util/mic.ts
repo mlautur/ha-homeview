@@ -24,25 +24,22 @@ export async function openMic(ctx: AudioContext, signal: AbortSignal, onSamples:
     const push = (samples: Float32Array) => {
       if (!closed) onSamples(samples);
     };
-    let node: AudioWorkletNode | ScriptProcessorNode | undefined;
+    let node: AudioWorkletNode | ScriptProcessorNode;
     let detach = () => {};
     if (ctx.audioWorklet) {
       const url = URL.createObjectURL(new Blob([RECORDER_WORKLET], { type: "text/javascript" }));
       try {
         await ctx.audioWorklet.addModule(url);
-        const worklet = new AudioWorkletNode(ctx, "homeview-recorder");
-        worklet.port.onmessage = (e: MessageEvent<Float32Array>) => push(e.data);
-        detach = () => (worklet.port.onmessage = null);
-        node = worklet;
-      } catch {
-        // a content security policy can block blob worklets: fall back to the script processor
       } finally {
         URL.revokeObjectURL(url);
       }
       signal.throwIfAborted();
-    }
-    if (!node) {
-      // Safari < 14.1, or no worklet
+      const worklet = new AudioWorkletNode(ctx, "homeview-recorder");
+      worklet.port.onmessage = (e: MessageEvent<Float32Array>) => push(e.data);
+      detach = () => (worklet.port.onmessage = null);
+      node = worklet;
+    } else {
+      // Safari < 14.1: no worklet
       const processor = ctx.createScriptProcessor(4096, 1, 1);
       processor.onaudioprocess = (e) => push(e.inputBuffer.getChannelData(0));
       detach = () => (processor.onaudioprocess = null);

@@ -137,13 +137,13 @@ const result = await page.evaluate(async (replyUrl) => {
     out.voice.push(r);
   }
 
-  // a long transcript and reply (a run that heard a whole paragraph) stay inside the card, two lines each
-  out.longText = [];
-  for (const [w, h, rows] of [[374, 0, undefined], [358, 184, 3], [358, 376, 6]]) {
+  // a long transcript and reply (a run that heard a whole paragraph) stay inside the card, two lines each,
+  // in the live wall-panel cell: a 12x3 voice card, 374x184 at a 390 px viewport, idle
+  {
     const cell = document.body.appendChild(document.createElement("div"));
-    cell.style.cssText = `width:${w}px;${h ? `height:${h}px;` : ""}margin:8px`;
+    cell.style.cssText = "width:374px;height:184px;margin:8px";
     const el = document.createElement("homeview-voice-card");
-    el.setConfig(rows ? { grid_options: { rows } } : {});
+    el.setConfig({ name: "Assist", speak: true, grid_options: { columns: 12, rows: 3 } });
     el.hass = hass;
     cell.appendChild(el);
     el._heard = "Привет! Как твои дела сегодня? Я только что закончил читать интересную книгу и решил поделиться своими мыслями о ней.";
@@ -153,7 +153,7 @@ const result = await page.evaluate(async (replyUrl) => {
     const q = (s) => el.shadowRoot.querySelector(s);
     const card = q("ha-card").getBoundingClientRect();
     const m = (s) => { const b = q(s).getBoundingClientRect(); return { lines: Math.round(b.height / parseFloat(getComputedStyle(q(s)).lineHeight)), out: b.bottom > card.bottom + 1 || b.right > card.right + 1 }; };
-    out.longText.push({ cell: rows ? `${w}x${h}` : `${w} wide`, heard: m(".heard"), reply: m(".reply") });
+    out.longText = { status: q(".sub").textContent, heard: m(".heard"), reply: m(".reply") };
     cell.remove();
   }
 
@@ -420,9 +420,11 @@ for (const v of result.voice) {
   if (Math.abs(v.css / v.buffer - 1) > 0.02) fail.push(`${at}: visualizer drawn at ${v.buffer.toFixed(2)} for a ${v.css.toFixed(2)} box, not round`);
   if (v.after === v.status) fail.push(`${at}: retry did not clear the error`);
 }
-for (const t of result.longText)
-  for (const k of ["heard", "reply"])
-    if (t[k].out || t[k].lines > 2) fail.push(`voice long ${k} in ${t.cell}: ${t[k].lines} lines${t[k].out ? ", outside the card" : ""}, expected at most 2 inside`);
+if (result.longText.status !== "Tap to talk") fail.push(`voice long text: status "${result.longText.status}", expected idle "Tap to talk"`);
+for (const k of ["heard", "reply"]) {
+  const t = result.longText[k];
+  if (t.out || t.lines > 2) fail.push(`voice long ${k} in the 374x184 panel cell: ${t.lines} lines${t.out ? ", outside the card" : ""}, expected at most 2 inside`);
+}
 const { silence, tapQuiet, typed, tapEarly } = result.mic;
 if (silence.status !== "Didn't catch that") fail.push(`mic silence: status "${silence.status}", expected "Didn't catch that"`);
 if (silence.ends) fail.push("mic silence: sent end-of-audio, so speech-to-text would transcribe the noise");
