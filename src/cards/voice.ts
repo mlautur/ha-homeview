@@ -22,6 +22,10 @@ export interface VoiceConfig extends BaseConfig {
 
 /** backstop if the microphone stops delivering audio; the Endpointer caps listening at 15 s */
 const LISTEN_LIMIT_MS = 16000;
+/** seconds a spoken reply may take to start playing (slow TTS or agent) before the card stops waiting */
+const REPLY_START_S = 30;
+/** seconds a playing reply may stop advancing before the card stops waiting */
+const REPLY_STALL_S = 6;
 const PHASE_TEXT: Record<VoicePhase, string> = {
   idle: "Tap to talk",
   listening: "Listening",
@@ -126,7 +130,19 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
     super.disconnectedCallback();
     cancelAnimationFrame(this.raf);
     void this.teardown();
-    this.audio?.pause();
+    if (this.speaking) {
+      this.speaking = false;
+      this._phase = "idle";
+    }
+    this.stopAudio();
+  }
+
+  private stopAudio(): void {
+    const audio = this.audio;
+    if (!audio) return;
+    audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
   }
 
   // ---------- pipeline ----------
@@ -293,20 +309,38 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
     }
     this._phase = "responding";
     this.speaking = true;
-    const done = (): void => {
-      if (this.audio !== audio) return;
+    // Never stay stuck in "responding": Home Assistant streams the reply, so its duration is often
+    // unknown (Infinity). Give up once playback stops advancing, whatever the length or the reason
+    // (stalled stream, blocked or silent output device), allowing a longer wait for the first audio.
+    let started = false;
+    let last = 0;
+    let still = 0;
+    audio.onplaying = () => {
+      started = true;
+      still = 0;
+    };
+    const watch = window.setInterval(() => {
+      if (this.audio !== audio || !this.speaking) done();
+      else if (audio.currentTime !== last) {
+        last = audio.currentTime;
+        still = 0;
+      } else if (++still >= (started ? REPLY_STALL_S : REPLY_START_S)) done(true);
+    }, 1000);
+    const done = (stalled = false): void => {
+      clearInterval(watch);
+      // a newer run (reset() clears speaking) or a newer reply owns the phase now
+      if (this.audio !== audio || !this.speaking) return;
       this.speaking = false;
-      this._phase = "idle";
+      if (!stalled) {
+        this._phase = "idle";
+        return;
+      }
+      this.stopAudio();
+      this.fail({ code: "tts-failed", message: "The spoken reply stopped before it finished" });
     };
-    audio.onended = done;
-    audio.onerror = done;
-    // never stay stuck in "responding" if the audio device stalls
-    const cap = window.setTimeout(done, 30000);
-    audio.onloadedmetadata = () => {
-      clearTimeout(cap);
-      if (Number.isFinite(audio.duration)) window.setTimeout(done, audio.duration * 1000 + 3000);
-    };
-    audio.play().catch(done);
+    audio.onended = () => done();
+    audio.onerror = () => done();
+    audio.play().catch(() => done());
   }
 
   private fail(e: unknown): void {
