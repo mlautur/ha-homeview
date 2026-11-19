@@ -5,7 +5,8 @@
 // Assist run spills out of the voice card, stretches its visualizer or does not clear on retry, or
 // if a mic run (stubbed microphone) sends noise to speech-to-text, drops a tap-stop or leaves a run open,
 // or if a spoken reply streamed without a length (as Home Assistant streams TTS) leaves the card stuck in
-// "Responding": headless WebKit reports it as playing but never advances it, like a stalled stream.
+// "Responding": headless WebKit reports it as playing but never advances it, like a stalled stream,
+// or if a reply whose first audio is slow to arrive (slow TTS or agent) is given up before it plays.
 // One-time setup: npx playwright-core install webkit. Run: npm run test:webkit
 import { readFileSync } from "node:fs";
 import http from "node:http";
@@ -14,13 +15,17 @@ import { webkit } from "playwright-core";
 // dev/fixtures/silence.mp3: 1 s of silence (ffmpeg -f lavfi -i anullsrc=r=22050:cl=mono -t 1 -b:a 32k),
 // sent in chunks with no Content-Length, so the browser cannot know its duration
 const mp3 = readFileSync(new URL("fixtures/silence.mp3", import.meta.url));
+// /slow.mp3 holds back its first bytes for 8 s: longer than the playing-stall limit, shorter than the start limit
 const tts = http.createServer((req, res) => {
-  res.writeHead(200, { "Content-Type": "audio/mpeg" });
-  res.write(mp3.subarray(0, 2000));
-  setTimeout(() => res.end(mp3.subarray(2000)), 100);
+  setTimeout(() => {
+    res.writeHead(200, { "Content-Type": "audio/mpeg" });
+    res.write(mp3.subarray(0, 2000));
+    setTimeout(() => res.end(mp3.subarray(2000)), 100);
+  }, req.url.endsWith("/slow.mp3") ? 8000 : 0);
 });
 await new Promise((r) => tts.listen(0, "127.0.0.1", r));
 const replyUrl = `http://127.0.0.1:${tts.address().port}/api/tts_proxy/reply.mp3`;
+const slowUrl = `http://127.0.0.1:${tts.address().port}/api/tts_proxy/slow.mp3`;
 
 const bundle = readFileSync(new URL("../dist/homeview.js", import.meta.url), "utf8");
 const browser = await webkit.launch();
@@ -276,6 +281,17 @@ result.replyThenTyped = await page.evaluate(async () => {
   await new Promise((r) => setTimeout(r, 7500));
   return { playing, after: q(".sub").textContent };
 });
+// a reply whose first audio takes 8 s to arrive must still show "Responding" at 7 s
+await page.evaluate((slowUrl) => {
+  const { emit } = window.__smoke;
+  emit({ type: "run-start", data: { runner_data: {} } });
+  emit({ type: "tts-end", data: { tts_output: { url: slowUrl } } });
+}, slowUrl);
+result.slowReply = await page.evaluate(async () => {
+  const { card: el } = window.__smoke;
+  await new Promise((r) => setTimeout(r, 7000));
+  return { at7s: el.shadowRoot.querySelector(".sub").textContent };
+});
 await browser.close();
 tts.close();
 
@@ -314,11 +330,12 @@ if (!reply.tapStarted) fail.push("voice reply: tapping the orb after the reply d
 const { replyThenTyped: rt } = result;
 if (rt.playing !== "Responding") fail.push(`voice reply then typed: status "${rt.playing}" while the second reply plays, expected "Responding"`);
 if (rt.after !== "Thinking") fail.push(`voice reply then typed: the new run shows "${rt.after}" after the old reply gave up, expected "Thinking"`);
+if (result.slowReply.at7s !== "Responding") fail.push(`voice slow reply: status "${result.slowReply.at7s}" 7 s into a reply whose first audio takes 8 s, expected "Responding"`);
 console.log(JSON.stringify(result.rendered));
 console.log(JSON.stringify(result.mic));
-console.log(JSON.stringify(result.reply), JSON.stringify(result.replyThenTyped));
+console.log(JSON.stringify(result.reply), JSON.stringify(result.replyThenTyped), JSON.stringify(result.slowReply));
 if (fail.length) {
   console.error(`WebKit smoke FAILED:\n- ${fail.join("\n- ")}`);
   process.exit(1);
 }
-console.log("WebKit smoke passed: 5 cards defined and rendered, clock round, hidden photo card idle, voice error contained and round, mic flows end runs, stalled reply recovers");
+console.log("WebKit smoke passed: 5 cards defined and rendered, clock round, hidden photo card idle, voice error contained and round, mic flows end runs, stalled reply recovers, slow reply waits");

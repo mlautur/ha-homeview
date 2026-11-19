@@ -22,7 +22,9 @@ export interface VoiceConfig extends BaseConfig {
 
 /** backstop if the microphone stops delivering audio; the Endpointer caps listening at 15 s */
 const LISTEN_LIMIT_MS = 16000;
-/** seconds a spoken reply may stop advancing (first audio included) before the card stops waiting */
+/** seconds a spoken reply may take to start playing (slow TTS or agent) before the card stops waiting */
+const REPLY_START_S = 30;
+/** seconds a playing reply may stop advancing before the card stops waiting */
 const REPLY_STALL_S = 6;
 const PHASE_TEXT: Record<VoicePhase, string> = {
   idle: "Tap to talk",
@@ -297,14 +299,19 @@ export class HomeViewVoiceCard extends HomeViewCard<VoiceConfig> {
     this.speaking = true;
     // Never stay stuck in "responding": Home Assistant streams the reply, so its duration is often
     // unknown (Infinity). Give up once playback stops advancing, whatever the length or the reason
-    // (stalled stream, blocked or silent output device).
-    let last = -1;
+    // (stalled stream, blocked or silent output device), allowing a longer wait for the first audio.
+    let started = false;
+    let last = 0;
     let still = 0;
+    audio.onplaying = () => {
+      started = true;
+      still = 0;
+    };
     const watch = window.setInterval(() => {
       if (audio.currentTime !== last) {
         last = audio.currentTime;
         still = 0;
-      } else if (++still >= REPLY_STALL_S) done();
+      } else if (++still >= (started ? REPLY_STALL_S : REPLY_START_S)) done();
     }, 1000);
     const done = (): void => {
       clearInterval(watch);
