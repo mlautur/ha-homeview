@@ -32,6 +32,9 @@ test("tile: active state per domain (locks highlight when not locked)", () => {
   assert.equal(isActive("lock", "locked"), false);
   assert.equal(isActive("lock", "unlocked"), true);
   assert.equal(isActive("lock", "jammed"), true);
+  // a lock in motion keeps the look it had until Home Assistant reports the new state
+  assert.equal(isActive("lock", "locking"), true);
+  assert.equal(isActive("lock", "unlocking"), false);
   assert.equal(isActive("cover", "open"), true);
   assert.equal(isActive("cover", "closed"), false);
   assert.equal(isActive("scene", "2026-01-01"), false);

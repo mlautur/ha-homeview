@@ -91,7 +91,9 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
     if (!s) sub = "Entity not found";
     else if (s.state === "unavailable") sub = "Unavailable";
     else if (this._confirming) sub = "Tap again to unlock";
-    else if (domain === "lock" && ["locking", "unlocking", "jammed", "opening", "open"].includes(s.state)) sub = s.state[0].toUpperCase() + s.state.slice(1);
+    // a lock in motion reads "Locking…" while the tile keeps its old look until Home Assistant reports the new state
+    else if (domain === "lock" && ["locking", "unlocking", "jammed", "opening", "open"].includes(s.state))
+      sub = s.state[0].toUpperCase() + s.state.slice(1) + (s.state.endsWith("ing") ? "\u2026" : "");
     // locks and covers read their own state (locked, open, closing...); scenes and scripts have none worth reading
     const stateText = !s ? "missing" : domain === "lock" || domain === "cover" || domain === "media_player" ? s.state : domain === "scene" || domain === "script" ? "" : on ? "on" : "off";
     return html`<button
@@ -216,37 +218,61 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
         display: inline-block;
         max-width: 100%;
       }
-      /* active: warm-white glass, dark ink (Apple Home "on" convention) */
+      /* active: frosted white glass and dark ink, as Apple's HomeView "on" tiles; the glyph glows warm gold on every
+         wallpaper. The glass swaps in ~0.1 s; the glyph follows a beat later, as on the panel. */
+      ha-card.tile .hv-tint {
+        transition-duration: 0.08s;
+      }
+      /* the ink fades with the glass so it never sits white on white mid-swap */
+      ha-card.tile .label,
+      ha-card.tile .label .sub {
+        transition: color 0.08s ease, text-shadow 0.08s ease;
+      }
+      ha-card.tile .icon svg {
+        transition: color 0.18s ease 0.08s, filter 0.18s ease 0.08s;
+      }
       ha-card.on {
         --hv-fill: rgb(255 255 255 / 0.8);
       }
+      ha-card.on .icon {
+        color: rgb(242 165 36);
+      }
       ha-card.on .label {
         text-shadow: none;
-        color: #2b241d;
+        color: #1d1d1f;
       }
       ha-card.on .label .sub {
-        color: rgb(43 36 29 / 0.62);
+        color: rgb(29 29 31 / 0.6);
       }
       ha-card.on .icon svg {
-        filter: none;
+        filter: drop-shadow(0 0 calc(var(--hv-ref) * 0.05) rgb(242 165 36 / 0.7));
       }
-      ha-card.light.on {
-        --hv-fill: rgb(255 246 226 / 0.82);
-        box-shadow:
-          0 0 calc(var(--hv-ref) * 0.25) rgb(255 196 90 / 0.55),
-          0 calc(var(--hv-ref) * 0.03) calc(var(--hv-ref) * 0.09) rgb(60 45 30 / 0.14);
+      /* padlock: locking flips the shackle 180deg about the leg it shares with the closed shackle (scaleX through 0)
+         and slides the lock home; unlocking runs the same flip back. Transforms only, so it stays on the compositor. */
+      .padlock .pl {
+        transition: transform 0.2s cubic-bezier(0.3, 0, 0.2, 1) 0.22s;
       }
-      ha-card.light.on .icon {
-        color: #f2a524;
+      .padlock .sh-open,
+      .padlock .sh-closed {
+        transform-origin: 16.55px 0;
       }
-      ha-card.light.on .icon svg {
-        filter: drop-shadow(0 0 calc(var(--hv-ref) * 0.05) rgb(255 190 70 / 0.9));
+      ha-card:not(.on) .padlock .sh-open,
+      ha-card.on .padlock .sh-closed {
+        transform: scaleX(0);
+        transition: transform 0.1s cubic-bezier(0.4, 0, 1, 1) 0.22s;
       }
-      ha-card.lock.on {
-        --hv-fill: rgb(255 240 225 / 0.8);
+      ha-card:not(.on) .padlock .sh-closed,
+      ha-card.on .padlock .sh-open {
+        transform: none;
+        transition: transform 0.12s cubic-bezier(0, 0, 0.2, 1) 0.32s;
       }
-      ha-card.lock.on .icon {
-        color: #e8792b;
+      ha-card.on .padlock .pl {
+        transform: translateX(-1.9px);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .padlock * {
+          transition: none !important;
+        }
       }
       ha-card.confirming .icon {
         color: #ffb27a;
@@ -255,19 +281,9 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
         color: #fff;
         font-weight: 600;
       }
-      ha-card.fan.on .icon {
-        color: #2f9d8f;
-      }
       ha-card.fan.on .blades {
         animation: spin 1.1s linear infinite;
         transform-origin: 12px 10px;
-      }
-      ha-card.cover.on .icon {
-        color: #3478f6;
-      }
-      ha-card.scene.on .icon,
-      ha-card.script.on .icon {
-        color: #6e66d6;
       }
       .icon img.art {
         width: 100%;
@@ -275,10 +291,6 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
         object-fit: cover;
         border-radius: calc(var(--hv-ref) * 0.05);
         box-shadow: 0 calc(var(--hv-ref) * 0.015) calc(var(--hv-ref) * 0.05) rgb(40 30 20 / 0.3);
-      }
-      ha-card.switch.on .icon,
-      ha-card.input_boolean.on .icon {
-        color: #f2a524;
       }
       @keyframes spin {
         to {
