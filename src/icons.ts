@@ -7,8 +7,9 @@ const g = (body: SVGTemplateResult): SVGTemplateResult =>
 export const ICONS: Record<string, SVGTemplateResult> = {
   sun: g(svg`<circle cx="12" cy="12" r="4.3"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2.2v2.4M12 19.4v2.4M2.2 12h2.4M19.4 12h2.4M5.1 5.1l1.7 1.7M17.2 17.2l1.7 1.7M5.1 18.9l1.7-1.7M17.2 6.8l1.7-1.7"/></g>`),
   moon: g(svg`<path d="M20.2 14.6A8.6 8.6 0 0 1 9.4 3.8a8.6 8.6 0 1 0 10.8 10.8z"/><path d="M17 3.2l.6 1.5 1.5.6-1.5.6-.6 1.5-.6-1.5-1.5-.6 1.5-.6zM20.6 7.6l.4.9.9.4-.9.4-.4.9-.4-.9-.9-.4.9-.4z"/>`),
-  lock: g(svg`<path d="M7.5 10V7.5a4.5 4.5 0 0 1 9 0V10" fill="none" stroke="currentColor" stroke-width="2.2"/><rect x="4.75" y="9.5" width="14.5" height="12" rx="2.6"/>`),
-  unlock: g(svg`<path d="M7.5 10V7.5a4.5 4.5 0 0 1 8.7-1.6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><rect x="4.75" y="9.5" width="14.5" height="12" rx="2.6"/>`),
+  // one padlock for both states: the tile flips the shackle about its shared leg (x 16.55) and slides the lock
+  // 1.9 to the left when open, so locking / unlocking animates instead of swapping glyphs (see tile.ts)
+  padlock: svg`<svg class="padlock" viewBox="0 0 24 24" fill="currentColor" overflow="visible" aria-hidden="true"><g class="pl"><path class="sh-open" d="M16.55 12V7a4.4 4.4 0 0 1 8.8 0v2.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path class="sh-closed" d="M7.75 12V7a4.4 4.4 0 0 1 8.8 0v5" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="5" y="11" width="14" height="11.25" rx="2.4"/></g></svg>`,
   light: g(svg`<rect x="11.1" y="1.5" width="1.8" height="5" rx=".9"/><rect x="8.6" y="1.2" width="6.8" height="1.9" rx=".95"/><path d="M12 6.2c-4.1 0-7.6 3.2-8 7.3-.05.5.35.9.85.9h14.3c.5 0 .9-.4.85-.9-.4-4.1-3.9-7.3-8-7.3z"/><path d="M8.6 15.6h6.8a3.4 3.4 0 0 1-6.8 0z"/>`),
   fan: g(svg`<circle cx="12" cy="10" r="8.2" fill="none" stroke="currentColor" stroke-width="1.6"/><g class="blades"><path d="M12 10c-.4-2.6.2-5 1.9-5.6 1.6-.5 2.6 1.4 1.4 3.1-.8 1.2-2 1.9-3.3 2.5z"/><path d="M12 10c2.4 1 4.2 2.8 3.8 4.5-.4 1.6-2.6 1.5-3.4-.4-.6-1.3-.6-2.7-.4-4.1z"/><path d="M12 10c-2 1.6-4.4 2.3-5.6 1.1-1.2-1.2.1-3 2.1-2.8 1.4.1 2.5.9 3.5 1.7z"/></g><circle cx="12" cy="10" r="1.3"/><path d="M10.6 18.1h2.8l.9 3.4H9.7z"/><rect x="7.5" y="21" width="9" height="1.8" rx=".9"/>`),
   curtains: g(svg`<rect x="2" y="2.5" width="20" height="1.8" rx=".9"/><path d="M4 4.3h6.5c-.3 4.6-1.4 9.8-3.5 16.9H4z"/><path d="M20 4.3h-6.5c.3 4.6 1.4 9.8 3.5 16.9H20z"/>`),
@@ -43,7 +44,7 @@ export function iconFor(domain: string, deviceClass: string | undefined, active:
     case "light":
       return ICONS.light;
     case "lock":
-      return active ? ICONS.unlock : ICONS.lock;
+      return ICONS.padlock;
     case "fan":
       return ICONS.fan;
     case "cover":

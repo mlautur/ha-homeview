@@ -55,7 +55,7 @@ export function isActive(domain: string, state: string): boolean {
     case "media_player":
       return state === "playing";
     case "lock":
-      return state !== "locked" && state !== "locking";
+      return state !== "locked" && state !== "unlocking";
     case "cover":
       return state === "open" || state === "opening";
     case "scene":
