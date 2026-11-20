@@ -69,7 +69,8 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
     const c = this._config!;
     const s = this.hass?.states[c.entity];
     const domain = domainOf(c.entity);
-    const on = s && !isUnavailable(s) && isActive(domain, s.state);
+    // a media player stays clear glass with white ink: what is playing is the news, not an "on" state
+    const on = s && !isUnavailable(s) && isActive(domain, s.state) && domain !== "media_player";
     return `tile ${domain} ${on || this._flash ? "on" : ""} ${isUnavailable(s) ? "unavailable" : ""} ${this._confirming ? "confirming" : ""}`;
   }
 
@@ -274,9 +275,6 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
         object-fit: cover;
         border-radius: calc(var(--hv-ref) * 0.05);
         box-shadow: 0 calc(var(--hv-ref) * 0.015) calc(var(--hv-ref) * 0.05) rgb(40 30 20 / 0.3);
-      }
-      ha-card.media_player.on .icon {
-        color: #2b241d;
       }
       ha-card.switch.on .icon,
       ha-card.input_boolean.on .icon {

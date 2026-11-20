@@ -295,7 +295,7 @@ var Oe=globalThis,Le=Oe.ShadowRoot&&(Oe.ShadyCSS===void 0||Oe.ShadyCSS.nativeSha
         display: grid;
         place-items: center;
       }
-    `];customElements.define("homeview-thermostat-card",ae);L("homeview-thermostat-card","HomeView Thermostat","Large liquid-glass thermostat with spring setpoint and heat/cool support.");var Ti=["light","switch","fan","lock","cover","scene","script","input_boolean","media_player"],ys=500,Y=class extends C{constructor(){super(...arguments);this._confirming=!1;this._flash=!1;this.holdTimer=0;this.held=!1;this.confirmTimer=0;this.down=()=>{this.held=!1,clearTimeout(this.holdTimer),this.holdTimer=window.setTimeout(()=>{this.held=!0,N(this,"hass-more-info",{entityId:this._config.entity})},ys)};this.up=()=>clearTimeout(this.holdTimer);this.cancel=()=>clearTimeout(this.holdTimer);this.onTap=()=>{if(this.held){this.held=!1;return}let e=this._config,t=e.tap_action??"toggle";if(t==="none"||!this.hass)return;if(t==="more-info"){N(this,"hass-more-info",{entityId:e.entity});return}let s=this.hass.states[e.entity];if(!s)return;let n=R(e.entity);if(n==="lock"&&s.state==="locked"&&e.confirm_unlock&&!this._confirming){this._confirming=!0,clearTimeout(this.confirmTimer),this.confirmTimer=window.setTimeout(()=>this._confirming=!1,3e3);return}this._confirming=!1;let o=jt(n,s.state);o&&(n==="scene"&&(this._flash=!0,setTimeout(()=>this._flash=!1,1200)),this.hass.callService(o[0],o[1],{},{entity_id:e.entity}))}}static getStubConfig(e){return{entity:Object.keys(e.states).find(s=>R(s)==="light")??Object.keys(e.states).find(s=>Ti.includes(R(s)))??""}}validate(e){if(!e.entity)throw new Error("Pick an entity")}getGridOptions(){return{columns:4,rows:"auto",min_columns:3,min_rows:2}}getCardSize(){return 3}cardClass(){var o;let e=this._config,t=(o=this.hass)==null?void 0:o.states[e.entity],s=R(e.entity),n=t&&!O(t)&&at(s,t.state);return`tile ${s} ${n||this._flash?"on":""} ${O(t)?"unavailable":""} ${this._confirming?"confirming":""}`}renderContent(){let e=this._config;if(!this.hass)return m;let t=this.hass.states[e.entity],s=R(e.entity),n=!!t&&!O(t)&&at(s,t.state),o=e.name??(t?j(this.hass,e.entity):e.entity),a=e.subtitle??Ie(this.hass,e.entity)??"",l="";t&&s==="media_player"&&!O(t)&&({title:o,sub:a}=ti(t,o),(t.state==="playing"||t.state==="paused")&&t.attributes.entity_picture&&(l=this.hass.hassUrl(t.attributes.entity_picture))),t?t.state==="unavailable"?a="Unavailable":this._confirming?a="Tap again to unlock":s==="lock"&&["locking","unlocking","jammed","opening","open"].includes(t.state)&&(a=t.state[0].toUpperCase()+t.state.slice(1)):a="Entity not found";let c=t?s==="lock"||s==="cover"||s==="media_player"?t.state:s==="scene"||s==="script"?"":n?"on":"off":"missing";return u`<button
+    `];customElements.define("homeview-thermostat-card",ae);L("homeview-thermostat-card","HomeView Thermostat","Large liquid-glass thermostat with spring setpoint and heat/cool support.");var Ti=["light","switch","fan","lock","cover","scene","script","input_boolean","media_player"],ys=500,Y=class extends C{constructor(){super(...arguments);this._confirming=!1;this._flash=!1;this.holdTimer=0;this.held=!1;this.confirmTimer=0;this.down=()=>{this.held=!1,clearTimeout(this.holdTimer),this.holdTimer=window.setTimeout(()=>{this.held=!0,N(this,"hass-more-info",{entityId:this._config.entity})},ys)};this.up=()=>clearTimeout(this.holdTimer);this.cancel=()=>clearTimeout(this.holdTimer);this.onTap=()=>{if(this.held){this.held=!1;return}let e=this._config,t=e.tap_action??"toggle";if(t==="none"||!this.hass)return;if(t==="more-info"){N(this,"hass-more-info",{entityId:e.entity});return}let s=this.hass.states[e.entity];if(!s)return;let n=R(e.entity);if(n==="lock"&&s.state==="locked"&&e.confirm_unlock&&!this._confirming){this._confirming=!0,clearTimeout(this.confirmTimer),this.confirmTimer=window.setTimeout(()=>this._confirming=!1,3e3);return}this._confirming=!1;let o=jt(n,s.state);o&&(n==="scene"&&(this._flash=!0,setTimeout(()=>this._flash=!1,1200)),this.hass.callService(o[0],o[1],{},{entity_id:e.entity}))}}static getStubConfig(e){return{entity:Object.keys(e.states).find(s=>R(s)==="light")??Object.keys(e.states).find(s=>Ti.includes(R(s)))??""}}validate(e){if(!e.entity)throw new Error("Pick an entity")}getGridOptions(){return{columns:4,rows:"auto",min_columns:3,min_rows:2}}getCardSize(){return 3}cardClass(){var o;let e=this._config,t=(o=this.hass)==null?void 0:o.states[e.entity],s=R(e.entity),n=t&&!O(t)&&at(s,t.state)&&s!=="media_player";return`tile ${s} ${n||this._flash?"on":""} ${O(t)?"unavailable":""} ${this._confirming?"confirming":""}`}renderContent(){let e=this._config;if(!this.hass)return m;let t=this.hass.states[e.entity],s=R(e.entity),n=!!t&&!O(t)&&at(s,t.state),o=e.name??(t?j(this.hass,e.entity):e.entity),a=e.subtitle??Ie(this.hass,e.entity)??"",l="";t&&s==="media_player"&&!O(t)&&({title:o,sub:a}=ti(t,o),(t.state==="playing"||t.state==="paused")&&t.attributes.entity_picture&&(l=this.hass.hassUrl(t.attributes.entity_picture))),t?t.state==="unavailable"?a="Unavailable":this._confirming?a="Tap again to unlock":s==="lock"&&["locking","unlocking","jammed","opening","open"].includes(t.state)&&(a=t.state[0].toUpperCase()+t.state.slice(1)):a="Entity not found";let c=t?s==="lock"||s==="cover"||s==="media_player"?t.state:s==="scene"||s==="script"?"":n?"on":"off":"missing";return u`<button
       class="hit"
       aria-label="${[o,a,c].filter(Boolean).join(", ")}"
       aria-pressed=${s==="scene"||s==="script"||s==="media_player"?m:String(n)}
@@ -428,9 +428,6 @@ var Oe=globalThis,Le=Oe.ShadowRoot&&(Oe.ShadyCSS===void 0||Oe.ShadyCSS.nativeSha
         object-fit: cover;
         border-radius: calc(var(--hv-ref) * 0.05);
         box-shadow: 0 calc(var(--hv-ref) * 0.015) calc(var(--hv-ref) * 0.05) rgb(40 30 20 / 0.3);
-      }
-      ha-card.media_player.on .icon {
-        color: #2b241d;
       }
       ha-card.switch.on .icon,
       ha-card.input_boolean.on .icon {
@@ -1182,7 +1179,7 @@ try { registerProcessor("homeview-recorder", HomeViewRecorder); } catch {}
       @click=${this.tap}
       @keydown=${this.onKey}
     >
-      ${this._src?u`<img src=${this._src} alt="" draggable="false" style="object-fit:${e.fit??"cover"}" />`:m}
+      ${this._src?u`<img class=${e.fit??"cover"} src=${this._src} alt="" draggable="false" style="object-fit:${e.fit??"cover"}" />`:m}
       ${!this._src||s?u`<div class="empty">${y.camera}<span>${t?s?"Offline":"Loading\u2026":"Camera not found"}</span></div>`:m}
       <div class="name">${n}</div>
     </ha-card>`}renderContent(){return m}};ue.properties={...C.properties,_src:{state:!0}},ue.editorFields=[{name:"entity",required:!0,selector:{entity:{filter:{domain:"camera"}}}},{name:"name",selector:{text:{}}},{name:"refresh",label:"Seconds between snapshots",selector:{number:{min:2,max:600,mode:"box",unit_of_measurement:"s"}}},{name:"fit",selector:{select:{mode:"dropdown",options:[{value:"cover",label:"Fill"},{value:"contain",label:"Fit whole picture"}]}}},{name:"tap_action",label:"Tap action",selector:{select:{mode:"dropdown",options:[{value:"live",label:"Live view, full screen"},{value:"more-info",label:"More info"},{value:"none",label:"Nothing"}]}}}],ue.styles=[H,S`
@@ -1224,6 +1221,11 @@ try { registerProcessor("homeview-recorder", HomeViewRecorder); } catch {}
         height: 100%;
         display: block;
         -webkit-user-drag: none;
+      }
+      /* filling the tile crops the sides: drop the top strip too, where cameras burn in their clock, so no half-cut text shows */
+      img.cover {
+        top: -7%;
+        height: 107%;
       }
       .empty {
         position: absolute;

@@ -159,7 +159,7 @@ export class HomeViewCameraCard extends HomeViewCard<CameraConfig> {
       @click=${this.tap}
       @keydown=${this.onKey}
     >
-      ${this._src ? html`<img src=${this._src} alt="" draggable="false" style="object-fit:${c.fit ?? "cover"}" />` : nothing}
+      ${this._src ? html`<img class=${c.fit ?? "cover"} src=${this._src} alt="" draggable="false" style="object-fit:${c.fit ?? "cover"}" />` : nothing}
       ${!this._src || off ? html`<div class="empty">${ICONS.camera}<span>${!s ? "Camera not found" : off ? "Offline" : "Loading\u2026"}</span></div>` : nothing}
       <div class="name">${name}</div>
     </ha-card>`;
@@ -210,6 +210,11 @@ export class HomeViewCameraCard extends HomeViewCard<CameraConfig> {
         height: 100%;
         display: block;
         -webkit-user-drag: none;
+      }
+      /* filling the tile crops the sides: drop the top strip too, where cameras burn in their clock, so no half-cut text shows */
+      img.cover {
+        top: -7%;
+        height: 107%;
       }
       .empty {
         position: absolute;
