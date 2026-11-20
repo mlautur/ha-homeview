@@ -128,12 +128,13 @@ export function bake(wall: Pixels, map: MapImage, ox: number, oy: number, p: Gla
   return { width: W, height: H, data: out };
 }
 
+const lin = (v: number): number => {
+  const s = v / 255;
+  return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+};
+
 /** Mean relative luminance (0..1, linear) of the opaque pixels. */
 export function meanLuminance(img: Pixels): number {
-  const lin = (v: number): number => {
-    const s = v / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  };
   let sum = 0;
   let n = 0;
   const d = img.data;
@@ -154,4 +155,42 @@ export function scrimAlpha(bg: number, tintL = 0.07, min = 0.1, max = 0.5): numb
   const target = 1.05 / 3 - 0.05; // 0.30
   if (bg <= target) return min;
   return Math.min(max, Math.max(min, (bg - target) / (bg - tintL)));
+}
+
+/**
+ * Accent for "on" glyphs taken from the wallpaper: its dominant hue (chroma-weighted circular mean),
+ * vivid and dark enough to read at >= 3:1 on the white "on" glass. Null when the wallpaper is too grey
+ * to carry a hue (the champagne default), so the tile keeps its warm gold.
+ */
+export function wallpaperAccent(img: Pixels): [number, number, number] | null {
+  let x = 0;
+  let y = 0;
+  let n = 0;
+  const d = img.data;
+  // every 16th pixel: plenty for a hue
+  for (let i = 0; i < d.length; i += 64) {
+    if (d[i + 3] === 0) continue;
+    n++;
+    const [r, g, b] = [d[i], d[i + 1], d[i + 2]];
+    const max = Math.max(r, g, b);
+    const c = (max - Math.min(r, g, b)) / 255;
+    if (!c) continue;
+    const h = max === r ? (g - b) / 255 / c : max === g ? (b - r) / 255 / c + 2 : (r - g) / 255 / c + 4;
+    x += Math.cos((h * Math.PI) / 3) * c;
+    y += Math.sin((h * Math.PI) / 3) * c;
+  }
+  if (!n || Math.hypot(x, y) / n < 0.12) return null;
+  const hue = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+  const hsl = (l: number): [number, number, number] => {
+    const a = 0.85 * Math.min(l, 1 - l);
+    const f = (k: number): number => {
+      const t = (k + hue / 30) % 12;
+      return Math.round(255 * (l - a * Math.max(-1, Math.min(t - 3, 9 - t, 1))));
+    };
+    return [f(0), f(8), f(4)];
+  };
+  for (let l = 0.5; ; l -= 0.02) {
+    const rgb = hsl(l);
+    if (1.05 / (0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]) + 0.05) >= 3 || l < 0.2) return rgb;
+  }
 }

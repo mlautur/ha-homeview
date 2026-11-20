@@ -218,8 +218,9 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
         display: inline-block;
         max-width: 100%;
       }
-      /* active: frosted white glass, navy glyph and ink, as Apple's HomeView "on" tiles (the wallpaper tints it lavender).
-         The glass swaps in ~0.1 s; the glyph follows a beat later, as on the panel. */
+      /* active: frosted white glass and dark ink, as Apple's HomeView "on" tiles; the glyph glows in the wallpaper's
+         accent (set by the glass from the wallpaper pixels) or a warm gold. The glass swaps in ~0.1 s; the glyph
+         follows a beat later, as on the panel. */
       ha-card.tile .hv-tint {
         transition-duration: 0.08s;
       }
@@ -235,17 +236,17 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
         --hv-fill: rgb(255 255 255 / 0.8);
       }
       ha-card.on .icon {
-        color: #1b1c6c;
+        color: rgb(var(--hv-accent-rgb, 242 165 36));
       }
       ha-card.on .label {
         text-shadow: none;
-        color: #0c0e38;
+        color: #1d1d1f;
       }
       ha-card.on .label .sub {
-        color: rgb(12 14 56 / 0.6);
+        color: rgb(29 29 31 / 0.6);
       }
       ha-card.on .icon svg {
-        filter: none;
+        filter: drop-shadow(0 0 calc(var(--hv-ref) * 0.05) rgb(var(--hv-accent-rgb, 242 165 36) / 0.7));
       }
       /* padlock: locking flips the shackle 180deg about the leg it shares with the closed shackle (scaleX through 0)
          and slides the lock home; unlocking runs the same flip back. Transforms only, so it stays on the compositor. */
