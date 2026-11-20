@@ -89,10 +89,9 @@ icon: mdi:door            # optional; HomeView glyphs are used by default
 ```
 
 Active states:
-- Lights glow warm.
-- An unlocked lock turns orange: locks highlight when they are *not* locked.
+- An active tile turns frosted white with a navy glyph and text, like Apple's HomeView "on" tiles.
+- Locks highlight when they are *not* locked. The padlock animates between open and closed, and a lock in motion reads "Locking…" or "Unlocking…" until Home Assistant reports the new state.
 - Fans spin.
-- Open covers turn blue.
 - Scenes flash when run.
 
 A media player tile shows the title and artist of what is playing, with the album art when there is one. Tap plays or pauses.
