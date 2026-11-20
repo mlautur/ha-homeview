@@ -92,6 +92,7 @@ export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
     clearTimeout(this.tick);
     this.tick = 0;
     this.run++; // an answer still on its way is dropped
+    this.fetchedFor = "";
   }
 
   protected resume(): void {

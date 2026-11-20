@@ -19,14 +19,20 @@ export interface CameraConfig extends BaseConfig {
   /** seconds between snapshots (default 10) */
   refresh?: number;
   fit?: "cover" | "contain";
+  /** percent of the snapshot hidden at the top when filling the tile, 0-20 (default 0) */
+  crop_top?: number;
   tap_action?: "live" | "more-info" | "none";
 }
 
+const STALE_AFTER = 2;
+
 export class HomeViewCameraCard extends HomeViewCard<CameraConfig> {
-  static properties = { ...HomeViewCard.properties, _src: { state: true } };
+  static properties = { ...HomeViewCard.properties, _src: { state: true }, _fails: { state: true } };
   /** the snapshot on screen; the next one loads off screen and replaces it when decoded */
   private _src = "";
   private loading = "";
+  /** snapshots that failed in a row; from STALE_AFTER on, the last frame gives way to a hint */
+  private _fails = 0;
   private timer = 0;
   private live?: HomeViewCameraLive;
 
@@ -35,6 +41,7 @@ export class HomeViewCameraCard extends HomeViewCard<CameraConfig> {
     { name: "name", selector: { text: {} } },
     { name: "refresh", label: "Seconds between snapshots", selector: { number: { min: 2, max: 600, mode: "box", unit_of_measurement: "s" } } },
     { name: "fit", selector: { select: { mode: "dropdown", options: [{ value: "cover", label: "Fill" }, { value: "contain", label: "Fit whole picture" }] } } },
+    { name: "crop_top", label: "Hide the top (percent, when filling)", selector: { number: { min: 0, max: 20, mode: "box", unit_of_measurement: "%" } } },
     {
       name: "tap_action",
       label: "Tap action",
@@ -78,6 +85,7 @@ export class HomeViewCameraCard extends HomeViewCard<CameraConfig> {
     super.updated?.(changed);
     if (changed.has("_config")) {
       this._src = "";
+      this._fails = 0;
       clearTimeout(this.timer);
       this.timer = 0;
     }
@@ -103,10 +111,14 @@ export class HomeViewCameraCard extends HomeViewCard<CameraConfig> {
     this.loading = url;
     const img = new Image();
     img.onload = () => {
-      if (this.loading === url) this._src = url;
+      if (this.loading !== url) return;
+      this._src = url;
+      this._fails = 0;
     };
     img.onerror = () => {
-      if (this.loading === url) this.loading = "";
+      if (this.loading !== url) return;
+      this.loading = "";
+      this._fails++;
     };
     img.src = url;
   };
@@ -151,16 +163,20 @@ export class HomeViewCameraCard extends HomeViewCard<CameraConfig> {
     const s = this.hass.states[c.entity];
     const off = !s || isUnavailable(s);
     const name = this.name();
+    const fit = c.fit ?? "cover";
+    const crop = fit === "cover" ? Math.min(20, Math.max(0, Number(c.crop_top) || 0)) : 0;
+    const src = this._fails >= STALE_AFTER ? "" : this._src;
+    const hint = !s ? "Camera not found" : off ? "Offline" : this._fails >= STALE_AFTER ? "Not responding" : "Loading\u2026";
     return html`<ha-card
-      class="camera ${this.square ? "square" : ""} ${this._src ? "shown" : ""}"
+      class="camera ${this.square ? "square" : ""} ${src ? "shown" : ""}"
       role="button"
       tabindex="0"
       aria-label="${name}: ${off ? "offline" : "open the live view"}"
       @click=${this.tap}
       @keydown=${this.onKey}
     >
-      ${this._src ? html`<img class=${c.fit ?? "cover"} src=${this._src} alt="" draggable="false" style="object-fit:${c.fit ?? "cover"}" />` : nothing}
-      ${!this._src || off ? html`<div class="empty">${ICONS.camera}<span>${!s ? "Camera not found" : off ? "Offline" : "Loading\u2026"}</span></div>` : nothing}
+      ${src ? html`<img src=${src} alt="" draggable="false" style="object-fit:${fit};top:${-crop}%;height:${100 + crop}%" />` : nothing}
+      ${!src || off ? html`<div class="empty">${ICONS.camera}<span>${hint}</span></div>` : nothing}
       <div class="name">${name}</div>
     </ha-card>`;
   }
@@ -210,11 +226,6 @@ export class HomeViewCameraCard extends HomeViewCard<CameraConfig> {
         height: 100%;
         display: block;
         -webkit-user-drag: none;
-      }
-      /* filling the tile crops the sides: drop the top strip too, where cameras burn in their clock, so no half-cut text shows */
-      img.cover {
-        top: -7%;
-        height: 107%;
       }
       .empty {
         position: absolute;

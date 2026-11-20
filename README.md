@@ -179,10 +179,11 @@ entity: camera.front_door
 name: Front Door          # optional
 refresh: 10               # seconds between snapshots
 fit: cover                # cover | contain
+crop_top: 0               # percent hidden at the top with fit: cover, 0-20 (0), e.g. a burned-in clock
 tap_action: live          # live (default) | more-info | none
 ```
 
-Tap for the live stream over the whole dashboard, played by Home Assistant's own camera player (HLS or WebRTC, whatever the camera offers). To close it, swipe down, press Escape or use the back gesture. It also closes by itself after 10 minutes. Snapshots pause while the card is hidden or the screen is off. A camera that is unavailable shows *Offline*.
+Tap for the live stream over the whole dashboard, played by Home Assistant's own camera player (HLS or WebRTC, whatever the camera offers). To close it, swipe down, press Escape or use the back gesture. It also closes by itself after 10 minutes. Snapshots pause while the card is hidden or the screen is off. A camera that is unavailable shows *Offline*; one whose snapshots keep failing shows *Not responding* instead of a frozen frame.
 
 ```yaml
 type: custom:homeview-vacuum-card

@@ -593,7 +593,12 @@ cardsPage.on("pageerror", (e) => errors.push(e.message));
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
 let snapshots = 0;
 await cardsPage.route("https://homeview.test/", (r) => r.fulfill({ contentType: "text/html", body: "<!doctype html><body style='margin:0;background:#888'></body>" }));
-await cardsPage.route(/\/api\/(camera_proxy|camera_proxy_stream|image_proxy)\//, (r) => (r.request().url().includes("/api/camera_proxy/") && snapshots++, r.fulfill({ contentType: "image/png", body: png })));
+await cardsPage.route(/\/api\/(camera_proxy|camera_proxy_stream|image_proxy)\//, (r) => {
+  const url = r.request().url();
+  if (url.includes("camera.broken")) return r.fulfill({ status: 500, body: "" });
+  if (url.includes("/api/camera_proxy/")) snapshots++;
+  return r.fulfill({ contentType: "image/png", body: png });
+});
 await cardsPage.goto("https://homeview.test/");
 await cardsPage.addScriptTag({
   content: `customElements.define("ha-card", class extends HTMLElement {
@@ -618,6 +623,7 @@ result.cards = await cardsPage.evaluate(async () => {
       "calendar.school": st("calendar.school", "off"),
       "camera.door": st("camera.door", "idle", { entity_picture: "/api/camera_proxy/camera.door?token=t", access_token: "t", friendly_name: "Door" }),
       "camera.gone": st("camera.gone", "unavailable", { friendly_name: "Gone" }),
+      "camera.broken": st("camera.broken", "idle", { entity_picture: "/api/camera_proxy/camera.broken?token=t", access_token: "t", friendly_name: "Broken" }),
       "vacuum.robot": st("vacuum.robot", "docked", { friendly_name: "Robot", fan_speed: "balanced", fan_speed_list: ["quiet", "balanced", "max", "custom"], supported_features: 4 | 16 | 32 | 256 | 512 | 8192 }),
       "sensor.robot_battery": st("sensor.robot_battery", "80", { device_class: "battery", unit_of_measurement: "%" }),
       "image.robot_map": st("image.robot_map", "2026-01-01T00:00:00", { entity_picture: "/api/image_proxy/image.robot_map?token=m" }),
@@ -666,6 +672,21 @@ result.cards = await cardsPage.evaluate(async () => {
   const narrow = await make("homeview-calendar-card", { entities: ["calendar.family"] }, 300, 120);
   const camera = await make("homeview-camera-card", { entity: "camera.door", refresh: 2, grid_options: { rows: 3 } }, 234, 184);
   const offline = await make("homeview-camera-card", { entity: "camera.gone", grid_options: { rows: 3 } }, 234, 184);
+  const cropped = await make("homeview-camera-card", { entity: "camera.door", crop_top: 50, grid_options: { rows: 3 } }, 234, 184);
+  const contained = await make("homeview-camera-card", { entity: "camera.door", fit: "contain", crop_top: 10, grid_options: { rows: 3 } }, 234, 184);
+  window.brokenCamera = await make("homeview-camera-card", { entity: "camera.broken", refresh: 2, grid_options: { rows: 3 } }, 234, 184);
+  // up next: removed before its first answer came back, then put back (a view change): it reads the calendars again
+  let held = 0;
+  const slowHass = { ...hass, callWS: (m) => (m.service === "get_events" && !held++ ? new Promise(() => {}) : hass.callWS(m)) };
+  const moved = document.body.appendChild(document.createElement("div"));
+  moved.style.cssText = "width:900px;height:120px;margin:8px;display:inline-block";
+  const movedCal = document.createElement("homeview-calendar-card");
+  movedCal.setConfig({ entities: ["calendar.family"] });
+  movedCal.hass = slowHass;
+  moved.appendChild(movedCal);
+  await movedCal.updateComplete;
+  movedCal.remove();
+  moved.appendChild(movedCal);
   const vacuum = await make("homeview-vacuum-card", { entity: "vacuum.robot", modes: ["select.robot_mop"], grid_options: { rows: 3 } }, 234, 184);
   const media = await make("homeview-tile-card", { entity: "media_player.room", grid_options: { rows: 3 } }, 234, 184);
   await wait(600);
@@ -676,6 +697,11 @@ result.cards = await cardsPage.evaluate(async () => {
   out.narrow = narrow.shadowRoot.querySelectorAll(".event").length;
   out.cameraShown = !!camera.shadowRoot.querySelector("img")?.getAttribute("src");
   out.offline = text(offline);
+  const imgStyle = (el) => { const i = el.shadowRoot.querySelector("img"); return i ? { top: i.style.top, height: i.style.height } : null; };
+  out.cropDefault = imgStyle(camera);
+  out.cropClamped = imgStyle(cropped);
+  out.cropContain = imgStyle(contained);
+  out.movedCalendar = text(movedCal);
   out.vacuum = text(vacuum);
   out.media = text(media);
   // media tile: a tap plays / pauses
@@ -716,6 +742,7 @@ result.cards = await cardsPage.evaluate(async () => {
 });
 await cardsPage.waitForTimeout(2500);
 result.cards.snapshotsAfter = snapshots;
+result.cards.broken = await cardsPage.evaluate(() => ({ text: brokenCamera.shadowRoot.querySelector("ha-card").textContent.replace(/\s+/g, " ").trim(), img: !!brokenCamera.shadowRoot.querySelector("img") }));
 await browser.close();
 tts.closeAllConnections();
 tts.close();
@@ -821,6 +848,11 @@ if (c.narrow !== 1) fail.push(`up next: a 300px strip shows ${c.narrow} events, 
 if (!c.cameraShown) fail.push("camera: no snapshot shown");
 if (c.snapshotsAfter < 2) fail.push(`camera: ${c.snapshotsAfter} snapshot(s) in about 3 s with a 2 s refresh, expected a refresh`);
 if (!/Offline/.test(c.offline)) fail.push(`camera: an unavailable camera shows "${c.offline}", expected Offline`);
+if (c.cropDefault?.top !== "0%" || c.cropDefault?.height !== "100%") fail.push(`camera: the top is cropped by default (${JSON.stringify(c.cropDefault)})`);
+if (c.cropClamped?.top !== "-20%" || c.cropClamped?.height !== "120%") fail.push(`camera: crop_top 50 gives ${JSON.stringify(c.cropClamped)}, expected clamped to 20%`);
+if (c.cropContain?.top !== "0%" || c.cropContain?.height !== "100%") fail.push(`camera: crop_top applied with fit contain (${JSON.stringify(c.cropContain)})`);
+if (c.broken.img || !/Not responding/.test(c.broken.text)) fail.push(`camera: a camera whose snapshots keep failing shows ${JSON.stringify(c.broken)}, expected Not responding and no frame`);
+if (!/Later/.test(c.movedCalendar)) fail.push(`up next: removed before its answer and put back, it shows "${c.movedCalendar}", expected the events read again`);
 if (!c.live?.covers || !c.live.stream.includes("/api/camera_proxy_stream/camera.door")) fail.push(`camera: a tap did not open the full-screen live view (${JSON.stringify(c.live)})`);
 if (!c.liveClosed) fail.push("camera: Escape did not close the live view");
 if (!/Robot/.test(c.vacuum) || !/Docked · 80%/.test(c.vacuum)) fail.push(`vacuum: tile shows "${c.vacuum}", expected Robot / Docked · 80%`);
