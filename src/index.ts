@@ -8,6 +8,10 @@ import "./cards/tile.ts";
 import "./cards/clock.ts";
 import "./cards/photo.ts";
 import "./cards/voice.ts";
+import "./cards/weather.ts";
+import "./cards/calendar.ts";
+import "./cards/camera.ts";
+import "./cards/vacuum.ts";
 
 declare const __VERSION__: string;
 console.info(`%c HOMEVIEW %c ${__VERSION__} `, "background:#928980;color:#fff;border-radius:3px 0 0 3px", "background:#2b241d;color:#fff;border-radius:0 3px 3px 0");

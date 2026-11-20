@@ -14,7 +14,7 @@ export interface HassConnection {
 
 export interface Hass {
   states: Record<string, HassEntity>;
-  entities?: Record<string, { area_id?: string | null; device_id?: string | null; name?: string | null }>;
+  entities?: Record<string, { area_id?: string | null; device_id?: string | null; name?: string | null; platform?: string }>;
   devices?: Record<string, { area_id?: string | null }>;
   areas?: Record<string, { name: string }>;
   config: { unit_system: { temperature: string }; time_zone: string };

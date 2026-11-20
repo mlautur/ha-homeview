@@ -1,15 +1,16 @@
 /**
- * HomeView tile: light, switch, fan, lock, cover, scene, script (and
- * input_boolean). Tap runs the domain action, hold opens more-info.
+ * HomeView tile: light, switch, fan, lock, cover, scene, script, input_boolean
+ * and media player (what is playing, tap to play / pause). Tap runs the domain
+ * action, hold opens more-info.
  */
 import { css, html, nothing, type TemplateResult } from "lit";
 import { HomeViewCard, glassStyles, type BaseConfig } from "./base.ts";
 import { areaName, domainOf, fireEvent, friendlyName, isUnavailable, registerCard, type GridOptions, type Hass } from "../ha.ts";
 import { iconFor } from "../icons.ts";
 import type { EditorField } from "../editor.ts";
-import { isActive, tapService } from "../logic.ts";
+import { isActive, mediaLines, tapService } from "../logic.ts";
 
-export const TILE_DOMAINS = ["light", "switch", "fan", "lock", "cover", "scene", "script", "input_boolean"];
+export const TILE_DOMAINS = ["light", "switch", "fan", "lock", "cover", "scene", "script", "input_boolean", "media_player"];
 
 export interface TileConfig extends BaseConfig {
   entity: string;
@@ -68,7 +69,8 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
     const c = this._config!;
     const s = this.hass?.states[c.entity];
     const domain = domainOf(c.entity);
-    const on = s && !isUnavailable(s) && isActive(domain, s.state);
+    // a media player stays clear glass with white ink: what is playing is the news, not an "on" state
+    const on = s && !isUnavailable(s) && isActive(domain, s.state) && domain !== "media_player";
     return `tile ${domain} ${on || this._flash ? "on" : ""} ${isUnavailable(s) ? "unavailable" : ""} ${this._confirming ? "confirming" : ""}`;
   }
 
@@ -78,18 +80,24 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
     const s = this.hass.states[c.entity];
     const domain = domainOf(c.entity);
     const on = !!s && !isUnavailable(s) && isActive(domain, s.state);
-    const name = c.name ?? (s ? friendlyName(this.hass, c.entity) : c.entity);
+    let name = c.name ?? (s ? friendlyName(this.hass, c.entity) : c.entity);
     let sub = c.subtitle ?? areaName(this.hass, c.entity) ?? "";
+    // a media player reads what is playing: the title, then the artist (or the player when idle)
+    let art = "";
+    if (s && domain === "media_player" && !isUnavailable(s)) {
+      ({ title: name, sub } = mediaLines(s, name));
+      if ((s.state === "playing" || s.state === "paused") && s.attributes.entity_picture) art = this.hass.hassUrl(s.attributes.entity_picture);
+    }
     if (!s) sub = "Entity not found";
     else if (s.state === "unavailable") sub = "Unavailable";
     else if (this._confirming) sub = "Tap again to unlock";
     else if (domain === "lock" && ["locking", "unlocking", "jammed", "opening", "open"].includes(s.state)) sub = s.state[0].toUpperCase() + s.state.slice(1);
     // locks and covers read their own state (locked, open, closing...); scenes and scripts have none worth reading
-    const stateText = !s ? "missing" : domain === "lock" || domain === "cover" ? s.state : domain === "scene" || domain === "script" ? "" : on ? "on" : "off";
+    const stateText = !s ? "missing" : domain === "lock" || domain === "cover" || domain === "media_player" ? s.state : domain === "scene" || domain === "script" ? "" : on ? "on" : "off";
     return html`<button
       class="hit"
       aria-label="${[name, sub, stateText].filter(Boolean).join(", ")}"
-      aria-pressed=${domain === "scene" || domain === "script" ? nothing : String(on)}
+      aria-pressed=${domain === "scene" || domain === "script" || domain === "media_player" ? nothing : String(on)}
       ?disabled=${!s || s.state === "unavailable"}
       @pointerdown=${this.down}
       @pointerup=${this.up}
@@ -98,7 +106,7 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
       @click=${this.onTap}
       @contextmenu=${(e: Event) => e.preventDefault()}
     >
-      <span class="icon">${c.icon ? html`<ha-icon .icon=${c.icon}></ha-icon>` : iconFor(domain, s?.attributes.device_class, on)}</span>
+      <span class="icon">${art ? html`<img class="art" src=${art} alt="" draggable="false" />` : c.icon ? html`<ha-icon .icon=${c.icon}></ha-icon>` : iconFor(domain, s?.attributes.device_class, on)}</span>
       <span class="label ink"><span class="title">${name}</span><br /><span class="sub">${sub}</span></span>
     </button>`;
   }
@@ -260,6 +268,13 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
       ha-card.scene.on .icon,
       ha-card.script.on .icon {
         color: #6e66d6;
+      }
+      .icon img.art {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: calc(var(--hv-ref) * 0.05);
+        box-shadow: 0 calc(var(--hv-ref) * 0.015) calc(var(--hv-ref) * 0.05) rgb(40 30 20 / 0.3);
       }
       ha-card.switch.on .icon,
       ha-card.input_boolean.on .icon {

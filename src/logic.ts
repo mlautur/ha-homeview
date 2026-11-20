@@ -1,6 +1,7 @@
 /**
  * Card behaviour that does not need the DOM: setpoint maths, tile actions,
- * clock angles, media listing, voice phases. Unit-tested in test/logic.test.ts.
+ * clock angles, media listing, voice phases, weather, calendar, camera and
+ * vacuum helpers. Unit-tested in test/logic.test.ts.
  */
 import type { Hass, HassEntity } from "./ha.ts";
 
@@ -51,6 +52,8 @@ export function defaultSide(s: HassEntity): "low" | "high" {
 
 export function isActive(domain: string, state: string): boolean {
   switch (domain) {
+    case "media_player":
+      return state === "playing";
     case "lock":
       return state !== "locked" && state !== "locking";
     case "cover":
@@ -72,6 +75,8 @@ export function tapService(domain: string, state: string): [string, string] | nu
       return state === "on" ? ["script", "turn_off"] : ["script", "turn_on"];
     case "cover":
       return ["cover", "toggle"];
+    case "media_player":
+      return state === "playing" || state === "paused" ? ["media_player", "media_play_pause"] : null;
     case "light":
     case "switch":
     case "fan":
@@ -290,4 +295,164 @@ export function satellitePhase(state: string | undefined): VoicePhase {
     default:
       return "idle";
   }
+}
+
+/** A media player tile's two lines: what is playing and who by, or the player's name and state. */
+export function mediaLines(s: HassEntity, name: string): { title: string; sub: string } {
+  const a = s.attributes;
+  const live = s.state === "playing" || s.state === "paused";
+  if (!live || !a.media_title) return { title: name, sub: live ? capitalize(s.state) : "Not playing" };
+  const by = a.media_artist || a.media_album_artist || a.app_name || "";
+  return { title: String(a.media_title), sub: s.state === "paused" ? (by ? `Paused \u00b7 ${by}` : "Paused") : String(by || name) };
+}
+
+export const capitalize = (s: string): string => (s ? s[0].toUpperCase() + s.slice(1).replace(/_/g, " ") : s);
+
+// ---- weather ----
+
+export interface ForecastEntry {
+  datetime: string;
+  condition?: string;
+  temperature?: number;
+  templow?: number;
+  precipitation_probability?: number;
+  /** expected amount, for forecasts without a chance of rain */
+  precipitation?: number;
+  is_daytime?: boolean;
+}
+
+/** weather entity supported_features bits: which forecast types it can stream */
+export const FORECAST_DAILY = 1;
+export const FORECAST_TWICE_DAILY = 4;
+
+/** The forecast type to subscribe to: daily where offered, else twice-daily, else none. */
+export function forecastType(features: number | undefined): "daily" | "twice_daily" | undefined {
+  const f = features ?? 0;
+  return f & FORECAST_DAILY ? "daily" : f & FORECAST_TWICE_DAILY ? "twice_daily" : undefined;
+}
+
+/**
+ * Today's high, low and chance of rain from a daily or twice-daily forecast. A daily entry
+ * carries both temperatures; a twice-daily one has a day entry (high) and a night entry (low).
+ */
+export function todayOutlook(f: ForecastEntry[] | undefined): { high?: number; low?: number; rain?: number; amount?: number } {
+  if (!f?.length) return {};
+  const num = (v: unknown): number | undefined => (typeof v === "number" && isFinite(v) ? v : undefined);
+  const daily = f[0].is_daytime === undefined;
+  const pair = daily ? f.slice(0, 1) : f.slice(0, 2);
+  const rains = pair.map((e) => num(e.precipitation_probability)).filter((v): v is number => v !== undefined);
+  const amounts = pair.map((e) => num(e.precipitation)).filter((v): v is number => v !== undefined);
+  const wet = { rain: rains.length ? Math.max(...rains) : undefined, amount: amounts.length ? amounts.reduce((a, b) => a + b, 0) : undefined };
+  if (daily) return { high: num(f[0].temperature), low: num(f[0].templow), ...wet };
+  const day = pair.find((e) => e.is_daytime);
+  const night = pair.find((e) => !e.is_daytime);
+  return { high: num(day?.temperature), low: num(night?.temperature ?? night?.templow), ...wet };
+}
+
+export const WEATHER_ICONS: Record<string, string> = {
+  "clear-night": "mdi:weather-night",
+  cloudy: "mdi:weather-cloudy",
+  exceptional: "mdi:alert-circle-outline",
+  fog: "mdi:weather-fog",
+  hail: "mdi:weather-hail",
+  lightning: "mdi:weather-lightning",
+  "lightning-rainy": "mdi:weather-lightning-rainy",
+  partlycloudy: "mdi:weather-partly-cloudy",
+  pouring: "mdi:weather-pouring",
+  rainy: "mdi:weather-rainy",
+  snowy: "mdi:weather-snowy",
+  "snowy-rainy": "mdi:weather-snowy-rainy",
+  sunny: "mdi:weather-sunny",
+  windy: "mdi:weather-windy",
+  "windy-variant": "mdi:weather-windy-variant",
+};
+
+const WEATHER_NAMES: Record<string, string> = {
+  "clear-night": "Clear",
+  partlycloudy: "Partly Cloudy",
+  "lightning-rainy": "Thunderstorms",
+  "snowy-rainy": "Sleet",
+  "windy-variant": "Windy",
+  exceptional: "Alert",
+  rainy: "Rain",
+  snowy: "Snow",
+};
+
+/** English name for a weather condition (the card prefers Home Assistant's own translation). */
+export const weatherName = (condition: string): string => WEATHER_NAMES[condition] ?? capitalize(condition);
+
+// ---- calendar ----
+
+export interface CalendarEvent {
+  /** "2026-11-20" for an all-day event, an ISO date-time otherwise */
+  start: string;
+  end: string;
+  summary: string;
+  /** which calendar entity it came from */
+  calendar?: string;
+}
+
+export const isAllDay = (e: CalendarEvent): boolean => e.start.length === 10;
+
+/** A calendar time: a bare date is local midnight (not UTC midnight, as Date would read it). */
+export function calendarTime(s: string): Date {
+  if (s.length === 10) {
+    const [y, m, d] = s.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
+  return new Date(s);
+}
+
+const dayStart = (d: Date): Date => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+/** The next `n` events that have not ended, soonest first; an event already under way comes first. */
+export function upcoming(events: CalendarEvent[], now: Date, n: number): CalendarEvent[] {
+  return events
+    .filter((e) => calendarTime(e.end) > now)
+    .sort((a, b) => calendarTime(a.start).getTime() - calendarTime(b.start).getTime() || a.summary.localeCompare(b.summary))
+    .slice(0, n);
+}
+
+/**
+ * The day badge for an event: TODAY, else the short weekday, and the day of the month. An event
+ * under way since an earlier day counts as today.
+ */
+export function dayBadge(e: CalendarEvent, now: Date, locale?: string): { label: string; day: number; today: boolean } {
+  const start = calendarTime(e.start);
+  const d = dayStart(start < now ? now : start);
+  const today = d.getTime() === dayStart(now).getTime();
+  return { label: today ? "TODAY" : d.toLocaleDateString(locale, { weekday: "short" }).toUpperCase(), day: d.getDate(), today };
+}
+
+/** "All day", or the event's start and end times ("4:00 PM - 5:00 PM"). */
+export function eventTime(e: CalendarEvent, locale?: string): string {
+  if (isAllDay(e)) return "All day";
+  const t = (s: string): string => calendarTime(s).toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" });
+  return `${t(e.start)} \u2013 ${t(e.end)}`;
+}
+
+// ---- camera ----
+
+/** A camera snapshot URL that changes every `seconds`, so the browser fetches a fresh frame. */
+export function snapshotUrl(entityPicture: string, now: number, seconds: number): string {
+  return `${entityPicture}${entityPicture.includes("?") ? "&" : "?"}hv=${Math.floor(now / (seconds * 1000))}`;
+}
+
+// ---- vacuum ----
+
+export const VACUUM_RUNNING = ["cleaning", "paused", "returning"];
+
+/** The vacuum's status line: "Docked", "Cleaning", ... and the battery when known ("Docked \u00b7 100%"). */
+export function vacuumStatus(state: string, battery?: number): string {
+  const names: Record<string, string> = { docked: "Docked", cleaning: "Cleaning", paused: "Paused", returning: "Returning to dock", idle: "Idle", error: "Error", unavailable: "Offline" };
+  const text = names[state] ?? capitalize(state);
+  return battery === undefined || state === "unavailable" ? text : `${text} \u00b7 ${Math.round(battery)}%`;
+}
+
+/**
+ * Roborock room ids from Home Assistant vacuum segment ids ("<map>_<room>"), for the
+ * `app_segment_clean` command. Ids that are not numbers are dropped.
+ */
+export function roborockRooms(segmentIds: string[]): number[] {
+  return segmentIds.map((id) => Number(id.split("_").pop())).filter((n) => Number.isInteger(n));
 }
