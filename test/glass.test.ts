@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { bendFromDepth, buildMap, glassParams, sdRoundedBox } from "../src/glass/map.ts";
-import { bake, boxBlur, boxRadius, crop, meanLuminance, scrimAlpha, wallpaperAccent, type Pixels } from "../src/glass/bake.ts";
+import { bake, boxBlur, boxRadius, crop, meanLuminance, scrimAlpha, type Pixels } from "../src/glass/bake.ts";
 import { backgroundRect } from "../src/glass/backdrop.ts";
 import { springAt, springEasing } from "../src/util/spring.ts";
 import { Endpointer, Resampler, audioFrame, toPcm16 } from "../src/util/audio.ts";
@@ -110,29 +110,6 @@ test("scrim keeps white text at >= 3:1 over bright wallpaper", () => {
     assert.ok(1.05 / (eff + 0.05) >= 2.999, `bg ${bg}`);
   }
   assert.ok(meanLuminance(solid(4, 4, [255, 255, 255])) > 0.99);
-});
-
-test("wallpaper accent: the wallpaper's hue, readable (>= 3:1) on the white on glass; none for a grey wallpaper", () => {
-  const lum = (rgb: number[]): number => meanLuminance(solid(1, 1, rgb as [number, number, number]));
-  const hue = ([r, g, b]: number[]): number => {
-    const max = Math.max(r, g, b), c = max - Math.min(r, g, b);
-    const h = max === r ? ((g - b) / c + 6) % 6 : max === g ? (b - r) / c + 2 : (r - g) / c + 4;
-    return h * 60;
-  };
-  // champagne (the default wallpaper) is too grey to carry a hue: the tile keeps its gold
-  assert.equal(wallpaperAccent(solid(8, 8, [0x92, 0x89, 0x80])), null);
-  assert.equal(wallpaperAccent(solid(8, 8, [128, 128, 128])), null);
-  for (const [name, rgb] of [["blue", [45, 60, 210]], ["teal", [0x17, 0x4c, 0x46]], ["yellow", [240, 220, 40]]] as const) {
-    const a = wallpaperAccent(solid(8, 8, [...rgb]))!;
-    assert.ok(a, name);
-    assert.ok(Math.abs(hue(a) - hue([...rgb])) < 4, `${name} keeps its hue: ${a}`);
-    assert.ok(1.05 / (lum(a) + 0.05) >= 3, `${name} reads on white: ${a}`);
-  }
-  // a mostly grey wallpaper with a little colour follows the colour that is there
-  const mixed = solid(8, 8, [120, 120, 120]);
-  for (let i = 0; i < mixed.data.length / 2; i += 4) mixed.data.set([220, 90, 30], i);
-  const m = wallpaperAccent(mixed)!;
-  assert.ok(m && m[0] > m[2], `warm: ${m}`);
 });
 
 test("background geometry: cover, contain and position", () => {

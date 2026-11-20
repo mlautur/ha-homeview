@@ -5,8 +5,8 @@
  * wallpaper / theme / device pixel ratio changes.
  */
 import type { ReactiveController, ReactiveControllerHost } from "lit";
-import { bake, boxBlur, crop, meanLuminance, scrimAlpha, wallpaperAccent } from "./bake.ts";
-import { backdropFor, findViewBackground, type Backdrop, type BackdropSnapshot } from "./backdrop.ts";
+import { bake, boxBlur, crop, meanLuminance, scrimAlpha } from "./bake.ts";
+import { backdropFor, findViewBackground, type Backdrop } from "./backdrop.ts";
 import { buildMap, glassParams, type GlassParams, type MapImage } from "./map.ts";
 import { filterMarkup, supportsLive } from "./live.ts";
 
@@ -32,13 +32,6 @@ export interface BakeTiming {
 
 /** Debug/measurement hook: window.homeview.timings */
 const stats = ((window as unknown as { homeview?: { timings: BakeTiming[] } }).homeview ??= { timings: [] });
-
-// one accent per wallpaper raster, shared by every card on it
-const accents = new WeakMap<BackdropSnapshot, [number, number, number] | null>();
-function accentOf(snap: BackdropSnapshot): [number, number, number] | null {
-  if (!accents.has(snap)) accents.set(snap, wallpaperAccent(snap.pixels));
-  return accents.get(snap)!;
-}
 
 const maps = new Map<string, MapImage>();
 function getMap(w: number, h: number, p: GlassParams, k: number): MapImage {
@@ -201,11 +194,6 @@ export class GlassController implements ReactiveController {
     this.mode = this.resolveMode();
     this.lastKey = this.key();
     card.dataset.glass = this.mode;
-    // "on" glyphs take the wallpaper's colour; without readable wallpaper pixels they keep the CSS default (gold)
-    const wall = this.backdrop?.snapshot;
-    const accent = wall ? accentOf(wall) : null;
-    if (accent) card.style.setProperty("--hv-accent-rgb", accent.join(" "));
-    else card.style.removeProperty("--hv-accent-rgb");
     if (this.mode !== "live") card.style.removeProperty("backdrop-filter");
     if (this.mode === "frost") {
       card.style.setProperty("--hv-tint-rgb", "84 74 64");
