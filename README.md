@@ -5,10 +5,14 @@ A card pack that brings an Apple HomeView-style wall panel to Home Assistant. Re
 | Card | Type | What it does |
 |---|---|---|
 | Thermostat | `custom:homeview-thermostat-card` | Big setpoint with a spring roll and chevrons. Single and heat/cool setpoints. Calls are debounced. |
-| Tile | `custom:homeview-tile-card` | Light, switch, fan, lock (optional unlock confirm), cover, scene, script. Tap acts, hold opens more-info. |
+| Tile | `custom:homeview-tile-card` | Light, switch, fan, lock (optional unlock confirm), cover, scene, script, media player (what is playing; tap plays / pauses). Tap acts, hold opens more-info. |
 | Clock | `custom:homeview-clock-card` | Analog clock on a round glass face. Smooth, ticking or hidden seconds hand. |
 | Photo frame | `custom:homeview-photo-card` | Slideshow from one or more Home Assistant media source folders (local media, DLNA, Synology Photos, ...). Swipe for the next or previous picture; tap for a full-screen slideshow. |
 | Voice | `custom:homeview-voice-card` | Talk to Assist with an audio-reactive visualizer, or mirror an `assist_satellite` device. |
+| Weather | `custom:homeview-weather-card` | Time and date, a big temperature, the condition, and today's high, low and chance of rain. |
+| Up next | `custom:homeview-calendar-card` | A strip with the next events from one or more calendars. |
+| Camera | `custom:homeview-camera-card` | Snapshot tile, refreshed every few seconds. Tap for the live stream full screen. |
+| Vacuum | `custom:homeview-vacuum-card` | Robot vacuum tile. Tap for a panel with the map, rooms, start / pause / dock / locate, suction and mop modes. |
 
 Every card works like a built-in card in the **Sections** view:
 - add it from the card picker (search "HomeView");
@@ -91,6 +95,8 @@ Active states:
 - Open covers turn blue.
 - Scenes flash when run.
 
+A media player tile shows the title and artist of what is playing, with the album art when there is one. Tap plays or pauses.
+
 ```yaml
 type: custom:homeview-clock-card
 seconds: sweep            # sweep | tick | off
@@ -145,6 +151,61 @@ Tap the orb to talk:
 The card stops listening after 1.2 seconds of quiet, so short pauses mid-sentence don't cut you off. If it hears nothing for 7 seconds, it shows "Didn't catch that" and sends nothing to speech-to-text, so the engine can't invent a sentence from room noise. Tap again to stop early; whatever was recorded is sent to speech-to-text. The keyboard button sends a typed request instead.
 
 When a run fails, the card shows a short reason ("Couldn't speak the reply", "Didn't catch that", ...). The orb becomes a retry button: it repeats a typed request, or listens again. **Details** shows Home Assistant's full error, which is also logged to the browser console.
+
+```yaml
+type: custom:homeview-weather-card
+entity: weather.home
+show_time: true           # the time and date along the top
+```
+
+The forecast streams from Home Assistant, so the card updates when the weather entity does. A forecast that has no chance of rain shows the expected amount instead. Tap for Home Assistant's weather dialog. In a short, wide cell the card leaves out the time and puts the high, low and rain beside the temperature.
+
+```yaml
+type: custom:homeview-calendar-card
+entities:
+  - calendar.family
+  - entity: calendar.school
+    color: "#30d158"      # optional; each calendar gets its own colour by default
+title: Up next            # optional
+days: 14                  # how far ahead to look (7)
+count: 3                  # at most this many events; fewer when the strip is narrow
+```
+
+Each event has a day badge (TODAY, or the weekday), its title, a dot in its calendar's colour and its time or "All day". Events that ended drop off. An event that is still going counts as today. The card reads the calendars again every 15 minutes, and whenever a calendar starts or ends an event. Size it as a strip, for example full width by 2 rows.
+
+```yaml
+type: custom:homeview-camera-card
+entity: camera.front_door
+name: Front Door          # optional
+refresh: 10               # seconds between snapshots
+fit: cover                # cover | contain
+tap_action: live          # live (default) | more-info | none
+```
+
+Tap for the live stream over the whole dashboard, played by Home Assistant's own camera player (HLS or WebRTC, whatever the camera offers). To close it, swipe down, press Escape or use the back gesture. It also closes by itself after 10 minutes. Snapshots pause while the card is hidden or the screen is off. A camera that is unavailable shows *Offline*.
+
+```yaml
+type: custom:homeview-vacuum-card
+entity: vacuum.robot
+name: Vacuum              # optional
+battery: sensor.robot_battery   # optional; defaults to the robot's own battery sensor
+map: image.robot_map            # optional; defaults to the robot's own map image
+modes:                    # optional select entities offered as choices
+  - select.robot_mop_mode
+  - select.robot_mop_intensity
+```
+
+The tile shows the status and battery ("Docked · 100%"). It turns while the robot cleans. Tap opens a panel over the dashboard:
+- the status, battery and map;
+- Start (or Resume), Pause, Dock and Locate, as the robot supports them;
+- rooms: pick some, and Start becomes *Clean N rooms*. Rooms come from the robot's map and are cleaned with Roborock's room command, so they show for Roborock robots only;
+- suction, and a row of choices for each `modes` select.
+
+Tap outside the panel, swipe down or press Escape to close it. Hold the tile for Home Assistant's own dialog.
+
+### Swipe Navigation
+
+[Swipe Navigation](https://github.com/zanna-37/hass-swipe-navigation) swipes between dashboard views, for example from the panel to a view of cameras. It works with HomeView. Swipes on the photo frame still change the picture and do not change the view.
 
 ### Voice needs HTTPS for the microphone
 

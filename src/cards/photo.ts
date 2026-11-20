@@ -13,6 +13,7 @@ import { trackGestures } from "../util/gesture.ts";
 import { inDialog } from "../glass/backdrop.ts";
 import { SLIDE_MS, emptyStage, stage, stageStyles, type StageState } from "./photo-stage.ts";
 import { HomeViewPhotoSlideshow, type SlideshowHost } from "./photo-fullscreen.ts";
+import { openOverlay } from "./overlay.ts";
 
 export interface PhotoConfig extends BaseConfig {
   /** one media-source folder, or a list of them: the slideshow cycles through all */
@@ -320,7 +321,7 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> implements Slid
     el.host = this;
     el.state = this._stage;
     this.slideshow = el;
-    document.body.appendChild(el);
+    openOverlay(el);
   }
 
   slideshowClosed(): void {
@@ -344,8 +345,10 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> implements Slid
     if (!this._config) return html``;
     const fit = this._config.fit ?? "cover";
     const shown = !!this._stage.urls[this._stage.front];
+    // "swiper": Swipe Navigation (a popular add-on that swipes between dashboard views) leaves
+    // drags on that class alone, so swiping the frame changes the picture, not the view
     return html`<ha-card
-      class="photo ${this.square ? "square" : ""} ${shown ? "shown" : ""}"
+      class="photo swiper ${this.square ? "square" : ""} ${shown ? "shown" : ""}"
       role=${shown ? "button" : nothing}
       tabindex=${shown ? "0" : nothing}
       aria-label=${shown ? "Photo frame: open the full-screen slideshow" : nothing}

@@ -15,6 +15,8 @@
 // or if swiping the photo frame does not step to the next / previous picture (retracing a shuffled order),
 // or a vertical drag changes it, or a tap does not open a full-screen slideshow that covers the screen,
 // swipes along with the card, and closes on a swipe down, on Escape and by itself after 3 hours.
+// or if the weather, up next, camera, vacuum or media cards show the wrong data, make the wrong service calls, or their
+// full-screen live view / vacuum panel does not open and close.
 // One-time setup: npx playwright-core install webkit. Run: npm run test:webkit
 import { readFileSync } from "node:fs";
 import http from "node:http";
@@ -583,6 +585,137 @@ await settle(3 * 3600 * 1000 - 5000);
 gs.before3h = !!(await g("slideshow"));
 await settle(6000);
 gs.after3h = !!(await g("slideshow"));
+
+// the weather, up next, camera, vacuum and media cards against a stub Home Assistant: what they show,
+// the service calls they make (recorded, nothing real), and the camera / vacuum overlays.
+const cardsPage = await browser.newPage({ viewport: { width: 1024, height: 768 } });
+cardsPage.on("pageerror", (e) => errors.push(e.message));
+const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+let snapshots = 0;
+await cardsPage.route("https://homeview.test/", (r) => r.fulfill({ contentType: "text/html", body: "<!doctype html><body style='margin:0;background:#888'></body>" }));
+await cardsPage.route(/\/api\/(camera_proxy|camera_proxy_stream|image_proxy)\//, (r) => (r.request().url().includes("/api/camera_proxy/") && snapshots++, r.fulfill({ contentType: "image/png", body: png })));
+await cardsPage.goto("https://homeview.test/");
+await cardsPage.addScriptTag({
+  content: `customElements.define("ha-card", class extends HTMLElement {
+    constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = "<style>:host{display:block}</style><slot></slot>"; }
+  });`,
+});
+await cardsPage.addScriptTag({ type: "module", content: bundle });
+result.cards = await cardsPage.evaluate(async () => {
+  const tags = ["weather", "calendar", "camera", "vacuum", "tile"].map((n) => `homeview-${n}-card`);
+  await Promise.all(tags.map((n) => customElements.whenDefined(n)));
+  const st = (entity_id, state, attributes = {}) => ({ entity_id, state, attributes, last_changed: "", last_updated: "", context: { id: "" } });
+  const day = (d, h, m = 0) => { const x = new Date(); x.setDate(x.getDate() + d); x.setHours(h, m, 0, 0); return x.toISOString(); };
+  const date = (d) => { const x = new Date(); x.setDate(x.getDate() + d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
+  const calls = [];
+  const ws = [];
+  const forecast = { forecast: [{ datetime: date(0), condition: "rainy", temperature: 71.4, templow: 53.6, precipitation_probability: 40 }] };
+  const hass = {
+    language: "en-US",
+    states: {
+      "weather.home": st("weather.home", "partlycloudy", { temperature: 64.2, supported_features: 1, friendly_name: "Home" }),
+      "calendar.family": st("calendar.family", "off"),
+      "calendar.school": st("calendar.school", "off"),
+      "camera.door": st("camera.door", "idle", { entity_picture: "/api/camera_proxy/camera.door?token=t", access_token: "t", friendly_name: "Door" }),
+      "camera.gone": st("camera.gone", "unavailable", { friendly_name: "Gone" }),
+      "vacuum.robot": st("vacuum.robot", "docked", { friendly_name: "Robot", fan_speed: "balanced", fan_speed_list: ["quiet", "balanced", "max", "custom"], supported_features: 4 | 16 | 32 | 256 | 512 | 8192 }),
+      "sensor.robot_battery": st("sensor.robot_battery", "80", { device_class: "battery", unit_of_measurement: "%" }),
+      "image.robot_map": st("image.robot_map", "2026-01-01T00:00:00", { entity_picture: "/api/image_proxy/image.robot_map?token=m" }),
+      "select.robot_mop": st("select.robot_mop", "standard", { options: ["standard", "deep", "custom"], friendly_name: "Robot Mop mode" }),
+      "media_player.room": st("media_player.room", "playing", { media_title: "Song", media_artist: "Band", friendly_name: "Room" }),
+    },
+    entities: {
+      "vacuum.robot": { device_id: "d1", platform: "roborock" },
+      "sensor.robot_battery": { device_id: "d1", platform: "roborock" },
+      "image.robot_map": { device_id: "d1", platform: "roborock" },
+      "select.robot_mop": { device_id: "d1", platform: "roborock" },
+    },
+    devices: {}, areas: {},
+    config: { unit_system: { temperature: "°F" } },
+    callService: async (domain, service, data, target) => { calls.push([`${domain}.${service}`, data, target?.entity_id]); },
+    callWS: async (m) => {
+      ws.push(m.type === "call_service" ? `${m.domain}.${m.service}` : m.type);
+      if (m.type === "call_service" && m.service === "get_events")
+        return { response: {
+          "calendar.family": { events: [{ summary: "Later", start: day(3, 9), end: day(3, 10) }, { summary: "Over", start: day(0, 0, 1), end: day(0, 0, 2) }, { summary: "Holiday", start: date(1), end: date(2) }] },
+          "calendar.school": { events: [{ summary: "Now", start: day(-1, 23), end: day(1, 1) }, { summary: "Far", start: day(5, 9), end: day(5, 10) }] },
+        } };
+      if (m.type === "vacuum/get_segments") return { segments: [{ id: "0_16", name: "Kitchen" }, { id: "0_17", name: "Office" }] };
+      return {};
+    },
+    connection: {
+      subscribeMessage: async (cb, m) => { ws.push(m.type); if (m.type === "weather/subscribe_forecast") setTimeout(() => cb(forecast), 10); return async () => ws.push("unsub:" + m.type); },
+    },
+    hassUrl: (p) => p,
+  };
+  const make = async (tag, config, w, h) => {
+    const cell = document.body.appendChild(document.createElement("div"));
+    cell.style.cssText = `width:${w}px;height:${h}px;margin:8px;display:inline-block;vertical-align:top`;
+    const el = document.createElement(tag);
+    el.setConfig(config);
+    el.hass = hass;
+    cell.appendChild(el);
+    await el.updateComplete;
+    return el;
+  };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const text = (el) => el.shadowRoot.querySelector("ha-card").textContent.replace(/\s+/g, " ").trim();
+  const out = {};
+  const weather = await make("homeview-weather-card", { entity: "weather.home", grid_options: { rows: 6 } }, 476, 376);
+  const calendar = await make("homeview-calendar-card", { entities: ["calendar.family", { entity: "calendar.school", color: "#123456" }] }, 900, 120);
+  const narrow = await make("homeview-calendar-card", { entities: ["calendar.family"] }, 300, 120);
+  const camera = await make("homeview-camera-card", { entity: "camera.door", refresh: 2, grid_options: { rows: 3 } }, 234, 184);
+  const offline = await make("homeview-camera-card", { entity: "camera.gone", grid_options: { rows: 3 } }, 234, 184);
+  const vacuum = await make("homeview-vacuum-card", { entity: "vacuum.robot", modes: ["select.robot_mop"], grid_options: { rows: 3 } }, 234, 184);
+  const media = await make("homeview-tile-card", { entity: "media_player.room", grid_options: { rows: 3 } }, 234, 184);
+  await wait(600);
+  out.weather = text(weather);
+  out.calendar = [...calendar.shadowRoot.querySelectorAll(".summary")].map((e) => e.textContent);
+  out.calendarBadges = [...calendar.shadowRoot.querySelectorAll(".wd")].map((e) => e.textContent);
+  out.calendarDot = calendar.shadowRoot.querySelector(".when i")?.style.background ?? "";
+  out.narrow = narrow.shadowRoot.querySelectorAll(".event").length;
+  out.cameraShown = !!camera.shadowRoot.querySelector("img")?.getAttribute("src");
+  out.offline = text(offline);
+  out.vacuum = text(vacuum);
+  out.media = text(media);
+  // media tile: a tap plays / pauses
+  media.shadowRoot.querySelector("button").click();
+  // camera: a tap opens the live view full screen (no Home Assistant player here: the MJPEG stream); Escape closes it
+  camera.shadowRoot.querySelector("ha-card").click();
+  await wait(400);
+  const live = document.querySelector("homeview-camera-live");
+  const r = live?.getBoundingClientRect();
+  out.live = live ? { covers: r.left === 0 && r.top === 0 && r.width === innerWidth && r.height === innerHeight, stream: live.shadowRoot.querySelector("img")?.getAttribute("src") ?? "" } : null;
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  await wait(500);
+  out.liveClosed = !document.querySelector("homeview-camera-live");
+  // vacuum: the panel lists rooms, suction and modes; picking a room makes Start clean just that room
+  vacuum.shadowRoot.querySelector("button").click();
+  await wait(400);
+  const panel = document.querySelector("homeview-vacuum-panel");
+  const q = (s) => [...(panel?.shadowRoot.querySelectorAll(s) ?? [])];
+  out.panel = panel ? { chips: q(".chip").map((b) => b.textContent.trim()), acts: q(".act").map((b) => b.textContent.trim()), map: !!q(".map img").length } : null;
+  q(".chip").find((b) => b.textContent.trim() === "Kitchen")?.click();
+  await panel?.updateComplete;
+  out.startLabel = q(".act.primary")[0]?.textContent.trim();
+  q(".act.primary")[0]?.click();
+  q(".chip").find((b) => b.textContent.trim() === "Max")?.click();
+  q(".chip").find((b) => b.textContent.trim() === "Deep")?.click();
+  // a tap outside the sheet closes the panel
+  const scrim = panel?.shadowRoot.querySelector(".scrim");
+  scrim?.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 5, clientY: 5 }));
+  await wait(500);
+  out.panelClosed = !document.querySelector("homeview-vacuum-panel");
+  // removing the card ends its forecast stream
+  weather.remove();
+  await wait(50);
+  out.calls = calls;
+  out.ws = ws;
+  return out;
+});
+await cardsPage.waitForTimeout(2500);
+result.cards.snapshotsAfter = snapshots;
 await browser.close();
 tts.closeAllConnections();
 tts.close();
@@ -676,8 +809,39 @@ if (gs.driftOpen) fail.push("photo slideshow: a 9 px drag opened the slideshow a
 if (gs.afterDrift === gs.beforeDrift) fail.push("photo gestures: no timed change after a 9 px drag; the slideshow stopped");
 if (!gs.before3h || gs.after3h) fail.push(`photo slideshow: expected it open until 3 h and closed after (open before: ${gs.before3h}, after: ${gs.after3h})`);
 console.log(JSON.stringify(gs));
+
+const c = result.cards;
+if (!/64°/.test(c.weather) || !/H: 71°/.test(c.weather) || !/L: 54°/.test(c.weather) || !/40%/.test(c.weather) || !/Partly Cloudy/.test(c.weather))
+  fail.push(`weather: shows "${c.weather}", expected 64°, Partly Cloudy, H: 71°, L: 54° and 40%`);
+if (!c.ws.includes("weather/subscribe_forecast") || !c.ws.includes("unsub:weather/subscribe_forecast")) fail.push(`weather: forecast not subscribed, or not dropped when the card was removed (${c.ws.join(", ")})`);
+if (c.calendar.join() !== "Now,Holiday,Later") fail.push(`up next: shows ${c.calendar.join(", ")}, expected Now, Holiday, Later (ended events dropped, soonest first, at most 3)`);
+if (c.calendarBadges[0] !== "TODAY") fail.push(`up next: an event under way since yesterday is badged "${c.calendarBadges[0]}", expected TODAY`);
+if (!/18, 52, 86|#123456/i.test(c.calendarDot)) fail.push(`up next: the school event's dot is "${c.calendarDot}", expected its calendar's colour`);
+if (c.narrow !== 1) fail.push(`up next: a 300px strip shows ${c.narrow} events, expected 1`);
+if (!c.cameraShown) fail.push("camera: no snapshot shown");
+if (c.snapshotsAfter < 2) fail.push(`camera: ${c.snapshotsAfter} snapshot(s) in about 3 s with a 2 s refresh, expected a refresh`);
+if (!/Offline/.test(c.offline)) fail.push(`camera: an unavailable camera shows "${c.offline}", expected Offline`);
+if (!c.live?.covers || !c.live.stream.includes("/api/camera_proxy_stream/camera.door")) fail.push(`camera: a tap did not open the full-screen live view (${JSON.stringify(c.live)})`);
+if (!c.liveClosed) fail.push("camera: Escape did not close the live view");
+if (!/Robot/.test(c.vacuum) || !/Docked · 80%/.test(c.vacuum)) fail.push(`vacuum: tile shows "${c.vacuum}", expected Robot / Docked · 80%`);
+if (!c.panel || !c.panel.map || !["Entire home", "Kitchen", "Office", "Quiet", "Balanced", "Max", "Standard", "Deep"].every((x) => c.panel.chips.includes(x)) || c.panel.chips.includes("Custom"))
+  fail.push(`vacuum: panel ${JSON.stringify(c.panel)}, expected the map, rooms, suction and mop choices (no Custom)`);
+if (c.panel && (c.panel.acts.includes("Pause") || !c.panel.acts.includes("Locate"))) fail.push(`vacuum: a docked robot offers ${c.panel.acts.join(", ")}, expected Start and Locate, no Pause`);
+if (c.startLabel !== "Clean 1 room") fail.push(`vacuum: Start reads "${c.startLabel}" with one room picked, expected "Clean 1 room"`);
+const want = [
+  ["media_player.media_play_pause", "media_player.room"],
+  ["vacuum.send_command", "vacuum.robot", { command: "app_segment_clean", params: [{ segments: [16], repeat: 1 }] }],
+  ["vacuum.set_fan_speed", "vacuum.robot", { fan_speed: "max" }],
+  ["select.select_option", "select.robot_mop", { option: "deep" }],
+];
+for (const [svc, entity, data] of want)
+  if (!c.calls.some(([s, d, e]) => s === svc && e === entity && (!data || JSON.stringify(d) === JSON.stringify(data)))) fail.push(`service call missing: ${svc} on ${entity} ${data ? JSON.stringify(data) : ""} (made: ${JSON.stringify(c.calls)})`);
+if (c.calls.length !== want.length) fail.push(`unexpected service calls: ${JSON.stringify(c.calls)}`);
+if (!c.panelClosed) fail.push("vacuum: a tap outside the panel did not close it");
+if (!/Song/.test(c.media) || !/Band/.test(c.media)) fail.push(`media tile: shows "${c.media}", expected the title and artist`);
+console.log(JSON.stringify(c));
 if (fail.length) {
   console.error(`WebKit smoke FAILED:\n- ${fail.join("\n- ")}`);
   process.exit(1);
 }
-console.log("WebKit smoke passed: 5 cards defined and rendered, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly, photo frame recovers from lost answers, swipes and opens / closes its full-screen slideshow");
+console.log("WebKit smoke passed: 5 cards defined and rendered, weather / up next / camera / vacuum / media tile show their data and make the right calls, camera live view and vacuum panel open and close, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly, photo frame recovers from lost answers, swipes and opens / closes its full-screen slideshow");

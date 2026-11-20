@@ -227,3 +227,68 @@ test("voice: failures become a short status line and keep the full detail", () =
   assert.deepEqual(voiceError("Assist error"), { text: "Something went wrong", detail: "Assist error" });
   assert.deepEqual(voiceError(undefined), { text: "Something went wrong", detail: "undefined" });
 });
+
+import {
+  calendarTime, dayBadge, eventTime, forecastType, mediaLines, roborockRooms, snapshotUrl, todayOutlook, upcoming, vacuumStatus, weatherName,
+} from "../src/logic.ts";
+
+test("media tile: playing, paused and idle lines; tap toggles play / pause", () => {
+  const p = (state: string, attributes: Record<string, unknown> = {}) => ({ entity_id: "media_player.x", state, attributes });
+  assert.deepEqual(mediaLines(p("playing", { media_title: "Song", media_artist: "Band" }), "Family Room"), { title: "Song", sub: "Band" });
+  assert.deepEqual(mediaLines(p("paused", { media_title: "Song", media_artist: "Band" }), "Family Room"), { title: "Song", sub: "Paused · Band" });
+  assert.deepEqual(mediaLines(p("playing", { media_title: "TV Audio" }), "Family Room"), { title: "TV Audio", sub: "Family Room" });
+  assert.deepEqual(mediaLines(p("idle", { media_title: "Old" }), "Family Room"), { title: "Family Room", sub: "Not playing" });
+  assert.equal(isActive("media_player", "playing"), true);
+  assert.equal(isActive("media_player", "paused"), false);
+  assert.deepEqual(tapService("media_player", "paused"), ["media_player", "media_play_pause"]);
+  assert.equal(tapService("media_player", "idle"), null);
+});
+
+test("weather: forecast type and today's high / low / rain", () => {
+  assert.equal(forecastType(1 | 2), "daily");
+  assert.equal(forecastType(4), "twice_daily");
+  assert.equal(forecastType(2), undefined);
+  assert.deepEqual(todayOutlook([{ datetime: "d", temperature: 71, templow: 54, precipitation_probability: 20 }]), { high: 71, low: 54, rain: 20, amount: undefined });
+  assert.deepEqual(todayOutlook([{ datetime: "d", temperature: 71, templow: 54, precipitation: 0.2 }]), { high: 71, low: 54, rain: undefined, amount: 0.2 });
+  const twice = [
+    { datetime: "a", is_daytime: false, temperature: 48, precipitation_probability: 10 },
+    { datetime: "b", is_daytime: true, temperature: 70, precipitation_probability: 40 },
+    { datetime: "c", is_daytime: false, temperature: 45, precipitation_probability: 90 },
+  ];
+  assert.deepEqual(todayOutlook(twice), { high: 70, low: 48, rain: 40, amount: undefined });
+  assert.deepEqual(todayOutlook([]), {});
+  assert.equal(weatherName("partlycloudy"), "Partly Cloudy");
+  assert.equal(weatherName("sunny"), "Sunny");
+});
+
+test("calendar: all-day dates are local, ended events drop, soonest first", () => {
+  assert.equal(calendarTime("2026-11-20").getHours(), 0);
+  assert.equal(calendarTime("2026-11-20").getDate(), 20);
+  const now = new Date(2026, 10, 20, 12, 0);
+  const at = (d: number, h: number) => new Date(2026, 10, d, h).toISOString();
+  const events = [
+    { summary: "Later", start: at(22, 9), end: at(22, 10) },
+    { summary: "Over", start: at(20, 8), end: at(20, 9) },
+    { summary: "Now", start: at(20, 11), end: at(20, 13) },
+    { summary: "Holiday", start: "2026-11-21", end: "2026-11-22" },
+  ];
+  assert.deepEqual(upcoming(events, now, 3).map((e) => e.summary), ["Now", "Holiday", "Later"]);
+  assert.deepEqual(dayBadge(events[2], now, "en-US"), { label: "TODAY", day: 20, today: true });
+  assert.deepEqual(dayBadge(events[0], now, "en-US"), { label: "SUN", day: 22, today: false });
+  // started yesterday, still going: today
+  assert.equal(dayBadge({ summary: "Trip", start: "2026-11-19", end: "2026-11-23" }, now, "en-US").label, "TODAY");
+  assert.equal(eventTime(events[3], "en-US"), "All day");
+  assert.equal(eventTime(events[0], "en-US"), "9:00 AM – 10:00 AM");
+});
+
+test("camera: snapshot URL changes once per interval", () => {
+  assert.equal(snapshotUrl("/api/camera_proxy/camera.x?token=t", 25000, 10), "/api/camera_proxy/camera.x?token=t&hv=2");
+  assert.equal(snapshotUrl("/a", 9999, 10), "/a?hv=0");
+});
+
+test("vacuum: status line and Roborock room ids", () => {
+  assert.equal(vacuumStatus("docked", 100), "Docked · 100%");
+  assert.equal(vacuumStatus("returning"), "Returning to dock");
+  assert.equal(vacuumStatus("unavailable", 50), "Offline");
+  assert.deepEqual(roborockRooms(["0_16", "0_21", "x_y", "22"]), [16, 21, 22]);
+});
