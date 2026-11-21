@@ -8,7 +8,7 @@
 # - Swipe Navigation (hass-swipe-navigation) for the swipes, set by `swipe_nav` below;
 # - a cover group of the four Family Room curtains, cover.family_room_curtains, so one tile opens and closes them all.
 #
-# Quadrant sizes in the 24-column section: a quadrant is 12 x 4, half a quadrant 6 x 4, the right column 12 x 8.
+# Quadrant sizes in the 24-column section: a quadrant is 12 x 4, half a quadrant 6 x 4.
 title: Echo Show
 swipe_nav:
   wrap: true
@@ -28,7 +28,7 @@ views:
           - type: custom:homeview-clock-card
             face: digital
             grid_options: { columns: 12, rows: 4 }
-          # right column: today's events, or what's next once today is done
+          # top right: today's events, or what's next once today is done
           - type: custom:homeview-calendar-card
             layout: day
             entities:
@@ -36,12 +36,17 @@ views:
               - calendar.work
               - calendar.holidays
               - calendar.birthdays
-            grid_options: { columns: 12, rows: 8 }
+            grid_options: { columns: 12, rows: 4 }
           # bottom left: Mavis, mirroring the Echo's own voice satellite
           - type: custom:homeview-voice-card
             name: Mavis
             speak: true
             satellite: assist_satellite.kitchen_display
+            grid_options: { columns: 12, rows: 4 }
+          # bottom right: the weather, without the time (the clock is beside it)
+          - type: custom:homeview-weather-card
+            entity: weather.home
+            show_time: false
             grid_options: { columns: 12, rows: 4 }
 
   - title: Controls

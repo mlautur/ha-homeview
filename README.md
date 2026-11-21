@@ -307,7 +307,7 @@ For the full HomeView look:
 ## Bedside screen (Echo Show)
 
 [`examples/echo-show.yaml`](examples/echo-show.yaml) turns a 2:1 screen such as an Echo Show 5 (960x480) into a bedside clock with swipeable pages, laid out like a quadrant grid: the time top left on the wallpaper, and the other quadrants filled with cards.
-- **Home**: the digital clock, Mavis (the voice card mirroring the Echo's own satellite) and the calendar's day panel down the right.
+- **Home**: the digital clock and the calendar's day panel along the top, Mavis (the voice card mirroring the Echo's own satellite) and the weather along the bottom.
 - **Controls**: the clock, a Now Playing tile that opens the Music page, the front door lock, the weather, the vacuum and one tile for a group of curtains.
 - **Music**, **Cameras**, **Weather** and **Calendar**: full-screen `panel` views.
 
