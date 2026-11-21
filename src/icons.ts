@@ -35,6 +35,9 @@ export const ICONS: Record<string, SVGTemplateResult> = {
   retry: g(svg`<path d="M19 12a7 7 0 1 1-2.05-4.95" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M20 3.6v6h-6z"/>`),
   stop: g(svg`<rect x="6" y="6" width="12" height="12" rx="2.5"/>`),
   close: svg`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
+  grid: g(svg`<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/>`),
+  muted: g(svg`<path d="M3 9.3v5.4c0 .6.4 1 1 1h3.2l4.3 3.8c.6.5 1.5.1 1.5-.7V5.2c0-.8-.9-1.2-1.5-.7L7.2 8.3H4c-.6 0-1 .4-1 1z"/><path d="m16 9 5 6m0-6-5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`),
+  sound: g(svg`<path d="M3 9.3v5.4c0 .6.4 1 1 1h3.2l4.3 3.8c.6.5 1.5.1 1.5-.7V5.2c0-.8-.9-1.2-1.5-.7L7.2 8.3H4c-.6 0-1 .4-1 1z"/><path d="M16 8.5a4.6 4.6 0 0 1 0 7M18.8 5.8a8.4 8.4 0 0 1 0 12.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`),
   send: g(svg`<path d="M3.4 11.2 19.6 4.1c.8-.3 1.6.5 1.3 1.3l-7.1 16.2c-.3.8-1.5.7-1.7-.1l-1.6-6.2-6.2-1.6c-.8-.2-.9-1.4-.1-1.7z"/>`),
 };
 
