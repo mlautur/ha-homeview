@@ -333,6 +333,10 @@ export class HomeViewCameraPage extends LitElement {
   }
 
   static styles = css`
+    :host([wide]) {
+      height: auto;
+      aspect-ratio: 2;
+    }
     :host {
       display: block;
       height: 100%;

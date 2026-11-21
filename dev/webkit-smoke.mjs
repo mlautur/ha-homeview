@@ -692,7 +692,16 @@ result.cards = await cardsPage.evaluate(async () => {
   const vacuum = await make("homeview-vacuum-card", { entity: "vacuum.robot", modes: ["select.robot_mop"], grid_options: { rows: 3 } }, 234, 184);
   const media = await make("homeview-tile-card", { entity: "media_player.room", grid_options: { rows: 3 } }, 234, 184);
   const camPage = await make("homeview-camera-card", { entities: [{ entity: "camera.door", name: "Front", crop_top: 7 }, "camera.gone", { entity: "camera.door", name: "Back" }], home_path: "/echo-show/home" }, 960, 480);
+  // the page anywhere but a panel view or a fixed-rows cell (a Sections cell with rows auto): an auto-height cell
+  const autoCell = document.body.appendChild(document.createElement("div"));
+  autoCell.style.cssText = "width:600px;margin:8px";
+  const autoPage = document.createElement("homeview-camera-card");
+  autoPage.setConfig({ entities: ["camera.door"] });
+  autoPage.hass = hass;
+  autoCell.appendChild(autoPage);
   await wait(600);
+  const ar = autoPage.getBoundingClientRect();
+  out.autoPageSize = [ar.width, ar.height];
   out.weather = text(weather);
   out.calendar = [...calendar.shadowRoot.querySelectorAll(".summary")].map((e) => e.textContent);
   out.calendarBadges = [...calendar.shadowRoot.querySelectorAll(".wd")].map((e) => e.textContent);
@@ -916,6 +925,7 @@ if (!c.panelClosed) fail.push("vacuum: a tap outside the panel did not close it"
 if (!/Song/.test(c.media) || !/Band/.test(c.media)) fail.push(`media tile: shows "${c.media}", expected the title and artist`);
 const cp = c.camPage;
 const doorLive = (s) => s.live.length === 1 && s.live[0].includes("/api/camera_proxy_stream/camera.door");
+if (c.autoPageSize.join() !== "600,300") fail.push(`camera page: in an auto-height 600px cell it is ${c.autoPageSize.join("x")}, expected 600x300 (2:1), not 0 px tall`);
 if (cp.size.join() !== "960,480") fail.push(`camera page: card is ${cp.size.join("x")} in a 960x480 cell, expected to fill it`);
 if (cp.hidden.live.length) fail.push("camera page: streams while scrolled out of view");
 if (cp.first.name !== "Front" || !doorLive(cp.first) || cp.first.mute !== "Unmute" || cp.first.dots !== 3) fail.push(`camera page: opens as ${JSON.stringify(cp.first)}, expected Front, one live stream, muted, 3 dots`);

@@ -30,7 +30,9 @@ export interface CameraConfig extends BaseConfig, CameraPageConfig {
 const STALE_AFTER = 2;
 
 export class HomeViewCameraCard extends HomeViewCard<CameraConfig> {
-  static properties = { ...HomeViewCard.properties, _src: { state: true }, _fails: { state: true } };
+  static properties = { ...HomeViewCard.properties, layout: { attribute: false }, _src: { state: true }, _fails: { state: true } };
+  /** set by Home Assistant: "panel" when the card is a panel view's only card */
+  layout?: string;
   /** the snapshot on screen; the next one loads off screen and replaces it when decoded */
   private _src = "";
   private loading = "";
@@ -184,7 +186,12 @@ export class HomeViewCameraCard extends HomeViewCard<CameraConfig> {
   protected render(): TemplateResult {
     const c = this._config;
     if (!c || !this.hass) return html``;
-    if (this.page) return html`<homeview-camera-page .hass=${this.hass} .config=${c}></homeview-camera-page>`;
+    if (this.page) {
+      // a panel view, or a cell with a fixed number of rows, gives the page its height; anywhere else (a Sections
+      // cell with rows auto, a masonry column) nothing does, so it takes the Echo Show's 2:1 shape instead of 0 px
+      const fill = this.layout === "panel" || typeof c.grid_options?.rows === "number";
+      return html`<homeview-camera-page .hass=${this.hass} .config=${c} ?wide=${!fill}></homeview-camera-page>`;
+    }
     if (!c.entity) return html``;
     const s = this.hass.states[c.entity];
     const off = !s || isUnavailable(s);
