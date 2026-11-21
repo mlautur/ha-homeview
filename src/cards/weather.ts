@@ -2,19 +2,22 @@
  * HomeView weather: the time and date, a big temperature, the condition, and today's high, low
  * and chance of rain, on the same glass as the tiles. The forecast streams from Home Assistant
  * (weather/subscribe_forecast), so it follows the weather entity without polling.
- * Tap for Home Assistant's own weather dialog.
+ * With `forecast_days` it becomes a full weather page: the condition and place, a huge temperature, and a
+ * glass row of the next days, straight on the wallpaper. Tap for Home Assistant's own weather dialog.
  */
 import { css, html, nothing, type TemplateResult } from "lit";
 import { HomeViewCard, glassStyles, type BaseConfig } from "./base.ts";
 import { domainOf, fireEvent, isUnavailable, registerCard, type GridOptions, type Hass } from "../ha.ts";
 import type { EditorField } from "../editor.ts";
 import { ICONS } from "../icons.ts";
-import { WEATHER_ICONS, forecastType, todayOutlook, weatherName, type ForecastEntry } from "../logic.ts";
+import { WEATHER_ICONS, calendarTime, forecastDays, forecastType, todayOutlook, weatherName, type ForecastEntry } from "../logic.ts";
 
 export interface WeatherConfig extends BaseConfig {
   entity: string;
-  /** show the time and date along the top (default true) */
+  /** show the time and date along the top (default true; not on the forecast page) */
   show_time?: boolean;
+  /** a row of this many days (1-7): the card becomes a full weather page */
+  forecast_days?: number;
 }
 
 export class HomeViewWeatherCard extends HomeViewCard<WeatherConfig> {
@@ -28,6 +31,7 @@ export class HomeViewWeatherCard extends HomeViewCard<WeatherConfig> {
   static editorFields: EditorField[] = [
     { name: "entity", required: true, selector: { entity: { filter: { domain: "weather" } } } },
     { name: "show_time", label: "Show the time and date", selector: { boolean: {} } },
+    { name: "forecast_days", label: "Forecast days", helper: "1-7 days in a row: turns the card into a full weather page", selector: { number: { min: 1, max: 7, mode: "box" } } },
   ];
 
   static getStubConfig(hass: Hass): Partial<WeatherConfig> {
@@ -36,14 +40,35 @@ export class HomeViewWeatherCard extends HomeViewCard<WeatherConfig> {
 
   protected validate(config: WeatherConfig): void {
     if (!config.entity || domainOf(config.entity) !== "weather") throw new Error("Pick a weather entity");
+    const n = config.forecast_days;
+    if (n !== undefined && (!Number.isInteger(n) || n < 1 || n > 7)) throw new Error("forecast_days is a whole number from 1 to 7");
   }
 
   getGridOptions(): GridOptions {
+    if (this.page) return { columns: "full", rows: 8, min_columns: 6, min_rows: 4 };
     return { columns: 6, rows: "auto", min_columns: 4, min_rows: 2 };
   }
 
+  /** the forecast page: text on the wallpaper, the day row on glass */
+  private get page(): boolean {
+    return !!this._config?.forecast_days;
+  }
+
+  protected get bare(): boolean {
+    return this.page;
+  }
+
+  protected get square(): boolean {
+    return !this.page && super.square;
+  }
+
+  /** the page is laid out 2:1, sized from whichever side is short */
+  protected refFrom(w: number, h: number): number {
+    return this.page ? Math.min(w / 2, h) : super.refFrom(w, h);
+  }
+
   protected cardClass(): string {
-    return "weather";
+    return this.page ? "weather page" : "weather";
   }
 
   connectedCallback(): void {
@@ -125,6 +150,7 @@ export class HomeViewWeatherCard extends HomeViewCard<WeatherConfig> {
     const condition = (this.hass as Hass & { formatEntityState?: (s: unknown) => string }).formatEntityState?.(s) ?? weatherName(s.state);
     const o = todayOutlook(this._forecast);
     const deg = (v?: number): string => (v === undefined ? "\u2013" : `${Math.round(v)}\u00b0`);
+    if (this.page) return this.renderPage(s, temp, condition, o, deg);
     return html`<button class="hit" aria-label="${condition}, ${temp}" @click=${this.more}>
       ${top}
       <div class="now ink">
@@ -133,6 +159,45 @@ export class HomeViewWeatherCard extends HomeViewCard<WeatherConfig> {
       </div>
       <div class="outlook ink">
         <span>H: ${deg(o.high)}</span><i></i><span class="dim">L: ${deg(o.low)}</span><i></i><span class="rain">${ICONS.drop}${this.wet(o, s.attributes.precipitation_unit)}</span>
+      </div>
+    </button>`;
+  }
+
+  private renderPage(
+    s: Hass["states"][string],
+    temp: string,
+    condition: string,
+    o: ReturnType<typeof todayOutlook>,
+    deg: (v?: number) => string,
+  ): TemplateResult {
+    const lang = this.hass!.language;
+    const today = new Date().toDateString();
+    const days = forecastDays(this._forecast, this._config!.forecast_days!);
+    const wet = this.wet(o, s.attributes.precipitation_unit);
+    const outlook = [`${deg(o.high)} / ${deg(o.low)}`, wet === "\u2013" ? "" : `${wet} rain`].filter(Boolean).join(" \u00b7 ");
+    return html`<button class="hit" aria-label="${condition}, ${temp}" @click=${this.more}>
+      <div class="hero ink">
+        <div class="where">
+          <div class="pcond">${condition}</div>
+          <div class="place">${s.attributes.friendly_name ?? ""}</div>
+        </div>
+        <div class="big">
+          <div class="ptemp">${temp}</div>
+          <div class="hl">${outlook}</div>
+        </div>
+      </div>
+      <div class="days hv-frost ink" style="--n:${this._config!.forecast_days}">
+        ${days.length
+          ? days.map((d) => {
+              const at = calendarTime(d.datetime); // a bare date is that local day, not UTC midnight
+              const name = at.toDateString() === today ? "Today" : at.toLocaleDateString(lang, { weekday: "short" });
+              return html`<div class="day">
+                <span class="dh">${deg(d.high)}</span><span class="dl">${deg(d.low)}</span>
+                <ha-icon .icon=${WEATHER_ICONS[d.condition ?? ""] ?? "mdi:weather-partly-cloudy"}></ha-icon>
+                <span class="dn">${name}</span>
+              </div>`;
+            })
+          : html`<div class="none">No forecast</div>`}
       </div>
     </button>`;
   }
@@ -273,9 +338,90 @@ export class HomeViewWeatherCard extends HomeViewCard<WeatherConfig> {
       ha-card[data-short][data-wide] .outlook i {
         display: none;
       }
+      /* the forecast page (reference: 4.5% edge, condition top left, temperature top right, a row of days) */
+      ha-card.page .hit {
+        display: flex;
+        flex-direction: column;
+        padding: calc(var(--hv-ref) * 0.045);
+        gap: calc(var(--hv-ref) * 0.045);
+      }
+      .hero {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: calc(var(--hv-ref) * 0.04);
+        padding: 0 calc(var(--hv-ref) * 0.04);
+      }
+      .where {
+        min-width: 0;
+        padding-top: calc(var(--hv-ref) * 0.025);
+      }
+      .pcond {
+        font-size: calc(var(--hv-ref) * 0.133);
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        line-height: 1.05;
+      }
+      .place,
+      .hl {
+        margin-top: calc(var(--hv-ref) * 0.012);
+        font-size: calc(var(--hv-ref) * 0.046);
+        color: rgb(255 255 255 / 0.88);
+        white-space: nowrap;
+      }
+      .big {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        flex: none;
+        margin-right: calc(var(--hv-ref) * 0.03);
+      }
+      .ptemp {
+        font-size: calc(var(--hv-ref) * 0.275);
+        font-weight: 300;
+        letter-spacing: -0.04em;
+        line-height: 1;
+        padding-left: 0.12em;
+      }
+      .days {
+        flex: none;
+        height: calc(var(--hv-ref) * 0.41);
+        display: grid;
+        grid-template-columns: repeat(var(--n), 1fr);
+        align-items: center;
+      }
+      .day {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: calc(var(--hv-ref) * 0.01);
+        line-height: 1.15;
+      }
+      .dh {
+        font-size: calc(var(--hv-ref) * 0.07);
+        font-weight: 600;
+      }
+      .dl,
+      .dn {
+        font-size: calc(var(--hv-ref) * 0.044);
+        color: rgb(255 255 255 / 0.88);
+      }
+      .day ha-icon {
+        --mdc-icon-size: calc(var(--hv-ref) * 0.085);
+        margin: calc(var(--hv-ref) * 0.008) 0;
+        filter: drop-shadow(var(--hv-shadow-text));
+      }
+      .none {
+        grid-column: 1 / -1;
+        text-align: center;
+        font-size: calc(var(--hv-ref) * 0.05);
+        color: var(--hv-ink-2);
+      }
     `,
   ];
 }
 
 customElements.define("homeview-weather-card", HomeViewWeatherCard);
-registerCard("homeview-weather-card", "HomeView Weather", "Time, temperature, condition and today's high, low and rain chance on liquid glass.");
+registerCard("homeview-weather-card", "HomeView Weather", "Time, temperature, condition and today's high, low and rain chance on liquid glass, or a full page with the next days.");

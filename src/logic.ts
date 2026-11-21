@@ -99,6 +99,23 @@ export function nowIn(timeZone?: string, d = new Date()): { h: number; m: number
   return { h: get("hour"), m: get("minute"), s: get("second"), ms: d.getMilliseconds() };
 }
 
+/**
+ * The digital clock's text: the time without AM/PM, and the date. The 12 / 24 hour choice follows the
+ * Home Assistant profile (`time_format`: "12", "24", "system" for the device's own, else the language's).
+ */
+export function clockText(d: Date, language?: string, timeFormat?: string, timeZone?: string): { time: string; date: string } {
+  const locale = timeFormat === "system" ? undefined : language;
+  const hourCycle = timeFormat === "12" ? "h12" : timeFormat === "24" ? "h23" : undefined;
+  const parts = new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", hourCycle, timeZone }).formatToParts(d);
+  const time = parts
+    .filter((p) => p.type !== "dayPeriod")
+    .map((p) => p.value)
+    .join("")
+    .replace(/[\s\u202f]+/g, " ")
+    .trim();
+  return { time, date: d.toLocaleDateString(locale, { weekday: "long", month: "long", day: "numeric", timeZone }) };
+}
+
 /** The photo card's `media`: one folder or a list of folders. */
 export function mediaFolders(media: unknown): string[] {
   const list = Array.isArray(media) ? media : [media];
@@ -349,6 +366,43 @@ export function todayOutlook(f: ForecastEntry[] | undefined): { high?: number; l
   return { high: num(day?.temperature), low: num(night?.temperature ?? night?.templow), ...wet };
 }
 
+export interface ForecastDay {
+  datetime: string;
+  condition?: string;
+  high?: number;
+  low?: number;
+  rain?: number;
+}
+
+/**
+ * The next `n` days of a daily or twice-daily forecast, one entry per day. Twice-daily entries are
+ * paired by local date: the day part gives the high and the condition, the night part the low.
+ */
+export function forecastDays(f: ForecastEntry[] | undefined, n: number): ForecastDay[] {
+  if (!f?.length || n < 1) return [];
+  const num = (v: unknown): number | undefined => (typeof v === "number" && isFinite(v) ? v : undefined);
+  if (f[0].is_daytime === undefined)
+    return f.slice(0, n).map((e) => ({ datetime: e.datetime, condition: e.condition, high: num(e.temperature), low: num(e.templow), rain: num(e.precipitation_probability) }));
+  const days = new Map<string, ForecastEntry[]>();
+  for (const e of f) {
+    const d = calendarTime(e.datetime);
+    const key = isNaN(d.getTime()) ? e.datetime : `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    days.set(key, [...(days.get(key) ?? []), e]);
+  }
+  return [...days.values()].slice(0, n).map((parts) => {
+    const day = parts.find((e) => e.is_daytime);
+    const night = parts.find((e) => !e.is_daytime);
+    const rains = parts.map((e) => num(e.precipitation_probability)).filter((v): v is number => v !== undefined);
+    return {
+      datetime: (day ?? parts[0]).datetime,
+      condition: (day ?? parts[0]).condition,
+      high: num(day?.temperature),
+      low: num(night?.temperature ?? night?.templow),
+      rain: rains.length ? Math.max(...rains) : undefined,
+    };
+  });
+}
+
 export const WEATHER_ICONS: Record<string, string> = {
   "clear-night": "mdi:weather-night",
   cloudy: "mdi:weather-cloudy",
@@ -387,7 +441,8 @@ export interface CalendarEvent {
   /** "2026-11-20" for an all-day event, an ISO date-time otherwise */
   start: string;
   end: string;
-  summary: string;
+  /** empty or missing for a free/busy-only calendar */
+  summary?: string;
   /** which calendar entity it came from */
   calendar?: string;
 }
@@ -405,23 +460,55 @@ export function calendarTime(s: string): Date {
 
 const dayStart = (d: Date): Date => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
+/** An event's title; a free/busy-only calendar shares events without one. */
+export const eventTitle = (e: CalendarEvent): string => e.summary?.trim() || "Busy";
+
 /** The next `n` events that have not ended, soonest first; an event already under way comes first. */
 export function upcoming(events: CalendarEvent[], now: Date, n: number): CalendarEvent[] {
   return events
     .filter((e) => calendarTime(e.end) > now)
-    .sort((a, b) => calendarTime(a.start).getTime() - calendarTime(b.start).getTime() || a.summary.localeCompare(b.summary))
+    .sort((a, b) => calendarTime(a.start).getTime() - calendarTime(b.start).getTime() || eventTitle(a).localeCompare(eventTitle(b)))
     .slice(0, n);
 }
+
+/**
+ * The day view: what is left of today (under way or still to come), soonest first, then what comes after
+ * to fill the rest of the `n` rows. `today` counts today's events (all of them, shown or not); when it is 0
+ * the card says what's next instead.
+ */
+export function dayAgenda(events: CalendarEvent[], now: Date, n: number): { today: number; events: CalendarEvent[] } {
+  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const left = upcoming(events, now, Infinity);
+  return { today: left.filter((e) => calendarTime(e.start) < tomorrow).length, events: left.slice(0, n) };
+}
+
+/** Whole days from today to an event's day (0 for an event under way). */
+export function daysUntil(e: CalendarEvent, now: Date): number {
+  const start = calendarTime(e.start);
+  return Math.round((dayStart(start < now ? now : start).getTime() - dayStart(now).getTime()) / 86400000);
+}
+
+/** How far off an event's day is: "today", "tomorrow", "in 3 days". */
+export const relativeDay = (e: CalendarEvent, now: Date, locale?: string): string =>
+  new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(daysUntil(e, now), "day");
 
 /**
  * The day badge for an event: TODAY, else the short weekday, and the day of the month. An event
  * under way since an earlier day counts as today.
  */
-export function dayBadge(e: CalendarEvent, now: Date, locale?: string): { label: string; day: number; today: boolean } {
+export function dayBadge(e: CalendarEvent, now: Date, locale?: string): { label: string; day: number; today: boolean; weekday: string; month: string; key: string } {
   const start = calendarTime(e.start);
   const d = dayStart(start < now ? now : start);
   const today = d.getTime() === dayStart(now).getTime();
-  return { label: today ? "TODAY" : d.toLocaleDateString(locale, { weekday: "short" }).toUpperCase(), day: d.getDate(), today };
+  const weekday = d.toLocaleDateString(locale, { weekday: "short" });
+  return {
+    label: today ? "TODAY" : weekday.toUpperCase(),
+    day: d.getDate(),
+    today,
+    weekday,
+    month: d.toLocaleDateString(locale, { month: "short" }).toUpperCase(),
+    key: `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`,
+  };
 }
 
 /** "All day", or the event's start and end times ("4:00 PM - 5:00 PM"). */

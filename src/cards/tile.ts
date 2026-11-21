@@ -5,7 +5,7 @@
  */
 import { css, html, nothing, type TemplateResult } from "lit";
 import { HomeViewCard, glassStyles, type BaseConfig } from "./base.ts";
-import { areaName, domainOf, fireEvent, friendlyName, isUnavailable, registerCard, type GridOptions, type Hass } from "../ha.ts";
+import { areaName, domainOf, fireEvent, friendlyName, isUnavailable, navigate, registerCard, type GridOptions, type Hass } from "../ha.ts";
 import { iconFor } from "../icons.ts";
 import type { EditorField } from "../editor.ts";
 import { isActive, mediaLines, tapService } from "../logic.ts";
@@ -17,13 +17,11 @@ export interface TileConfig extends BaseConfig {
   name?: string;
   subtitle?: string;
   icon?: string;
-  tap_action?: "toggle" | "more-info" | "none";
+  tap_action?: "toggle" | "more-info" | "navigate" | "none";
+  /** with tap_action: navigate, the dashboard path to open, such as /echo-show/music */
+  navigation_path?: string;
   confirm_unlock?: boolean;
 }
-
-/** Whether the entity is in its highlighted ("on") state. Locks highlight when NOT locked. */
-
-/** The service call a tap performs, or null when nothing should happen. */
 
 const HOLD_MS = 500;
 
@@ -43,8 +41,19 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
     {
       name: "tap_action",
       label: "Tap action",
-      selector: { select: { mode: "dropdown", options: [{ value: "toggle", label: "Toggle / run" }, { value: "more-info", label: "More info" }, { value: "none", label: "Nothing" }] } },
+      selector: {
+        select: {
+          mode: "dropdown",
+          options: [
+            { value: "toggle", label: "Toggle / run" },
+            { value: "more-info", label: "More info" },
+            { value: "navigate", label: "Open a view" },
+            { value: "none", label: "Nothing" },
+          ],
+        },
+      },
     },
+    { name: "navigation_path", label: "View to open", helper: "With Open a view: a dashboard path such as /echo-show/music", selector: { text: {} } },
     { name: "confirm_unlock", label: "Confirm before unlocking (locks)", selector: { boolean: {} } },
   ];
 
@@ -55,6 +64,7 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
 
   protected validate(config: TileConfig): void {
     if (!config.entity) throw new Error("Pick an entity");
+    if (config.tap_action === "navigate" && !config.navigation_path?.trim()) throw new Error("Add the navigation_path to open, such as /lovelace/music");
   }
 
   getGridOptions(): GridOptions {
@@ -99,7 +109,7 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
     return html`<button
       class="hit"
       aria-label="${[name, sub, stateText].filter(Boolean).join(", ")}"
-      aria-pressed=${domain === "scene" || domain === "script" || domain === "media_player" ? nothing : String(on)}
+      aria-pressed=${domain === "scene" || domain === "script" || domain === "media_player" || c.tap_action === "navigate" ? nothing : String(on)}
       ?disabled=${!s || s.state === "unavailable"}
       @pointerdown=${this.down}
       @pointerup=${this.up}
@@ -135,6 +145,10 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
     if (action === "none" || !this.hass) return;
     if (action === "more-info") {
       fireEvent(this, "hass-more-info", { entityId: c.entity });
+      return;
+    }
+    if (action === "navigate") {
+      navigate(c.navigation_path!.trim());
       return;
     }
     const s = this.hass.states[c.entity];
@@ -206,7 +220,8 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
         transition: color 0.35s ease, filter 0.35s ease;
       }
       .label {
-        padding: 0 6px;
+        box-sizing: border-box;
+        padding: 0 calc(var(--hv-ref) * 0.07);
         max-width: 100%;
         overflow: hidden;
       }

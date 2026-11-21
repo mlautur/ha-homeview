@@ -19,6 +19,8 @@ export interface Hass {
   areas?: Record<string, { name: string }>;
   config: { unit_system: { temperature: string }; time_zone: string };
   language?: string;
+  /** the user's profile settings: time_format is "language" | "system" | "12" | "24" */
+  locale?: { language?: string; time_format?: string };
   callService(domain: string, service: string, data?: Record<string, unknown>, target?: Record<string, unknown>): Promise<unknown>;
   callWS<T>(msg: Record<string, unknown>): Promise<T>;
   connection: HassConnection;
@@ -42,6 +44,12 @@ export interface GridOptions {
 
 export function fireEvent(node: EventTarget, type: string, detail: unknown = {}): void {
   node.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
+}
+
+/** Open a dashboard path the way Home Assistant's own navigate action does. */
+export function navigate(path: string): void {
+  history.pushState(null, "", path);
+  fireEvent(window, "location-changed", { replace: false });
 }
 
 export const domainOf = (entityId: string): string => entityId.split(".")[0];
