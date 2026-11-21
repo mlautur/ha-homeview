@@ -19,6 +19,7 @@
 // full-screen live view / vacuum panel does not open and close,
 // or if the camera card's page mode does not stream just the camera on screen, swipe (wrapping) between cameras
 // while ignoring vertical drags, unmute, pick from its grid, or go home.
+// or if the Now Playing card does not tick its progress, control its one player, open its volume slider or go back home.
 // One-time setup: npx playwright-core install webkit. Run: npm run test:webkit
 import { readFileSync } from "node:fs";
 import http from "node:http";
@@ -595,7 +596,7 @@ cardsPage.on("pageerror", (e) => errors.push(e.message));
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
 let snapshots = 0;
 await cardsPage.route("https://homeview.test/", (r) => r.fulfill({ contentType: "text/html", body: "<!doctype html><body style='margin:0;background:#888'></body>" }));
-await cardsPage.route(/\/api\/(camera_proxy|camera_proxy_stream|image_proxy)\//, (r) => {
+await cardsPage.route(/\/api\/(camera_proxy|camera_proxy_stream|image_proxy|media_player_proxy)\//, (r) => {
   const url = r.request().url();
   if (url.includes("camera.broken")) return r.fulfill({ status: 500, body: "" });
   if (url.includes("/api/camera_proxy/")) snapshots++;
@@ -609,7 +610,7 @@ await cardsPage.addScriptTag({
 });
 await cardsPage.addScriptTag({ type: "module", content: bundle });
 result.cards = await cardsPage.evaluate(async () => {
-  const tags = ["weather", "calendar", "camera", "vacuum", "tile"].map((n) => `homeview-${n}-card`);
+  const tags = ["weather", "calendar", "camera", "vacuum", "tile", "media"].map((n) => `homeview-${n}-card`);
   await Promise.all(tags.map((n) => customElements.whenDefined(n)));
   const st = (entity_id, state, attributes = {}) => ({ entity_id, state, attributes, last_changed: "", last_updated: "", context: { id: "" } });
   const day = (d, h, m = 0) => { const x = new Date(); x.setDate(x.getDate() + d); x.setHours(h, m, 0, 0); return x.toISOString(); };
@@ -631,6 +632,8 @@ result.cards = await cardsPage.evaluate(async () => {
       "image.robot_map": st("image.robot_map", "2026-01-01T00:00:00", { entity_picture: "/api/image_proxy/image.robot_map?token=m" }),
       "select.robot_mop": st("select.robot_mop", "standard", { options: ["standard", "deep", "custom"], friendly_name: "Robot Mop mode" }),
       "media_player.room": st("media_player.room", "playing", { media_title: "Song", media_artist: "Band", friendly_name: "Room" }),
+      "media_player.echo": st("media_player.echo", "playing", { entity_picture: "/api/media_player_proxy/media_player.echo?token=t", media_title: "Golden Hour", media_artist: "Artist", media_album_name: "Album", media_duration: 209, media_position: 23, media_position_updated_at: new Date().toISOString(), volume_level: 0.42, shuffle: false, repeat: "off", supported_features: 1 | 2 | 4 | 16 | 32 | 16384 | 32768 | 262144, friendly_name: "Echo Show" }),
+      "media_player.quiet": st("media_player.quiet", "idle", { friendly_name: "Quiet", supported_features: 1 | 16384 }),
     },
     entities: {
       "vacuum.robot": { device_id: "d1", platform: "roborock" },
@@ -699,6 +702,8 @@ result.cards = await cardsPage.evaluate(async () => {
   autoPage.setConfig({ entities: ["camera.door"] });
   autoPage.hass = hass;
   autoCell.appendChild(autoPage);
+  const np = await make("homeview-media-card", { entity: "media_player.echo", navigation_path: "/echo-show/home" }, 960, 480);
+  const npIdle = await make("homeview-media-card", { entity: "media_player.quiet" }, 960, 480);
   await wait(600);
   const ar = autoPage.getBoundingClientRect();
   out.autoPageSize = [ar.width, ar.height];
@@ -762,6 +767,49 @@ result.cards = await cardsPage.evaluate(async () => {
   out.camPage.path = location.pathname;
   // media tile: a tap plays / pauses
   media.shadowRoot.querySelector("button").click();
+  // now playing: what is on, a clock that runs on, every control on its one player, the volume slider, and the close button
+  {
+    const q = (s) => np.shadowRoot.querySelector(s);
+    const btn = (label) => [...np.shadowRoot.querySelectorAll("button")].find((b) => b.getAttribute("aria-label").startsWith(label));
+    const elapsed = () => q(".times span").textContent;
+    // where the bar should be: 0:23 when the state was made, plus the time the cards before it took
+    const since = (Date.now() - Date.parse(hass.states["media_player.echo"].attributes.media_position_updated_at)) / 1000;
+    out.np = { expect: Math.floor(23 + since), text: text(np), at: elapsed(), art: q(".art img")?.getAttribute("src") ?? "", backdrop: !!q(".bg img"), close: !!btn("Close") };
+    out.np.sizes = [...np.shadowRoot.querySelectorAll("button")].map((b) => Math.min(b.offsetWidth, b.offsetHeight));
+    await wait(1500);
+    out.np.later = elapsed();
+    for (const l of ["Previous", "Pause", "Next", "Shuffle", "Repeat"]) btn(l).click();
+    const seek = q(".prog input");
+    // a position report mid-drag leaves the thumb under the finger
+    seek.value = "120";
+    seek.dispatchEvent(new Event("input"));
+    const echo = hass.states["media_player.echo"];
+    np.hass = { ...hass, states: { ...hass.states, "media_player.echo": { ...echo, attributes: { ...echo.attributes, media_position_updated_at: new Date(Date.now() + 1000).toISOString() } } } };
+    await np.updateComplete;
+    out.np.heldDrag = q(".prog input").value;
+    seek.value = "100";
+    seek.dispatchEvent(new Event("change"));
+    btn("Volume").click();
+    await np.updateComplete;
+    const vol = q(".pop input");
+    out.np.volumeOpen = !!vol && !btn("Shuffle");
+    if (vol) {
+      // as a browser does: input while the thumb moves, then change on release
+      vol.value = "60";
+      vol.dispatchEvent(new Event("input"));
+      vol.dispatchEvent(new Event("change"));
+    }
+    // a tap elsewhere closes the slider
+    document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, composed: true }));
+    await np.updateComplete;
+    out.np.volumeClosed = !q(".pop") && !!btn("Shuffle");
+    let changed = false;
+    window.addEventListener("location-changed", () => (changed = true), { once: true });
+    btn("Close").click();
+    out.np.navigated = changed && location.pathname === "/echo-show/home";
+    const iq = (s) => npIdle.shadowRoot.querySelector(s);
+    out.np.idle = { text: text(npIdle), art: !!iq(".art .none"), prog: !!iq(".prog"), close: !!iq(".top"), next: iq("button[aria-label=Next]")?.disabled };
+  }
   // camera: a tap opens the live view full screen (no Home Assistant player here: the MJPEG stream); Escape closes it
   camera.shadowRoot.querySelector("ha-card").click();
   await wait(400);
@@ -918,6 +966,15 @@ if (c.panel && (c.panel.acts.includes("Pause") || !c.panel.acts.includes("Locate
 if (c.startLabel !== "Clean 1 room") fail.push(`vacuum: Start reads "${c.startLabel}" with one room picked, expected "Clean 1 room"`);
 const want = [
   ["media_player.media_play_pause", "media_player.room"],
+  ["media_player.media_previous_track", "media_player.echo"],
+  ["media_player.media_play_pause", "media_player.echo"],
+  ["media_player.media_next_track", "media_player.echo"],
+  ["media_player.shuffle_set", "media_player.echo", { shuffle: true }],
+  ["media_player.repeat_set", "media_player.echo", { repeat: "all" }],
+  ["media_player.media_seek", "media_player.echo", { seek_position: 100 }],
+  ["media_player.volume_set", "media_player.echo", { volume_level: 0.6 }],
+  // the release resends the last level, which the 250 ms throttle may have skipped
+  ["media_player.volume_set", "media_player.echo", { volume_level: 0.6 }],
   ["vacuum.send_command", "vacuum.robot", { command: "app_segment_clean", params: [{ segments: [16], repeat: 1 }] }],
   ["vacuum.set_fan_speed", "vacuum.robot", { fan_speed: "max" }],
   ["select.select_option", "select.robot_mop", { option: "deep" }],
@@ -943,9 +1000,21 @@ if (!cp.tileTops.length || cp.tileTops.some((t) => t !== "-7%")) fail.push(`came
 if (cp.tiles.join() !== "Front,Gone,Back") fail.push(`camera page: picker shows ${cp.tiles.join(", ")}, expected Front, Gone, Back`);
 if (cp.picked.name !== "Front" || !cp.pickerClosed || cp.picked.mute !== "Unmute") fail.push(`camera page: picking Front shows ${JSON.stringify(cp.picked)} (picker closed: ${cp.pickerClosed}), expected Front, muted again, picker closed`);
 if (cp.path !== "/echo-show/home") fail.push(`camera page: the home button went to ${cp.path}, expected /echo-show/home`);
+const np = c.np;
+if (!/Golden Hour/.test(np.text) || !/Artist/.test(np.text) || !/Album/.test(np.text) || !/3:29/.test(np.text)) fail.push(`now playing: shows "${np.text}", expected the title, artist, album and length`);
+const secs = (t) => t.split(":").reduce((a, b) => a * 60 + Number(b), 0);
+if (Math.abs(secs(np.at) - np.expect) > 1 || secs(np.later) <= secs(np.at))
+  fail.push(`now playing: progress read ${np.at} then ${np.later} 1.5 s later, expected about ${np.expect} s (0:23 plus the time since) and running on`);
+if (!np.art || !np.backdrop || !np.close) fail.push(`now playing: art ${np.art}, blurred backdrop ${np.backdrop}, close button ${np.close}`);
+if (np.sizes.some((s) => s < 44)) fail.push(`now playing: buttons smaller than 44px (${np.sizes.join(", ")})`);
+if (!np.volumeOpen || !np.volumeClosed) fail.push(`now playing: volume slider open ${np.volumeOpen}, closed by a tap elsewhere ${np.volumeClosed}`);
+if (np.heldDrag !== "120") fail.push(`now playing: a position report mid-drag moved the seek thumb to ${np.heldDrag}, expected it held at 120`);
+if (!np.navigated) fail.push("now playing: the close button did not navigate to its navigation_path");
+if (!/Not playing/.test(np.idle.text) || !/Quiet/.test(np.idle.text) || !np.idle.art || np.idle.prog || np.idle.close || np.idle.next !== true)
+  fail.push(`now playing: an idle player shows ${JSON.stringify(np.idle)}, expected Not playing, its name, an empty art frame, no progress, no close button and Next disabled`);
 console.log(JSON.stringify(c));
 if (fail.length) {
   console.error(`WebKit smoke FAILED:\n- ${fail.join("\n- ")}`);
   process.exit(1);
 }
-console.log("WebKit smoke passed: 5 cards defined and rendered, weather / up next / camera / vacuum / media tile show their data and make the right calls, camera live view and vacuum panel open and close, camera page streams one camera, swipes, wraps, unmutes, picks and goes home, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly, photo frame recovers from lost answers, swipes and opens / closes its full-screen slideshow");
+console.log("WebKit smoke passed: 5 cards defined and rendered, weather / up next / camera / vacuum / media tile / now playing show their data and make the right calls, camera live view and vacuum panel open and close, camera page streams one camera, swipes, wraps, unmutes, picks and goes home, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly, photo frame recovers from lost answers, swipes and opens / closes its full-screen slideshow");
