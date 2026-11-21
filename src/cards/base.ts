@@ -306,6 +306,6 @@ export abstract class HomeViewCard<C extends BaseConfig = BaseConfig> extends Li
     super.connectedCallback();
     // re-attach the sizer after a move between parents (Sections drag and drop)
     if (this.hasUpdated && !this.sizer) this.observeCard();
-    if (this.hasUpdated) musicPage(this, this._config?.music_page, this.hass);
+    if (this.hasUpdated) musicPage(this, this._config?.music_page);
   }
 }

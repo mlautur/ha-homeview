@@ -750,6 +750,18 @@ result.cards = await cardsPage.evaluate(async () => {
   await wait(1000);
   out.musicBack = location.pathname;
   musicCard.remove();
+  // a cached view comes back: its card reconnects holding the idle player it saw when the view was left,
+  // then gets the fresh hass where the player is already playing; that is not a start
+  history.replaceState(null, "", "/echo-show/cameras");
+  const cached = await make("homeview-clock-card", { face: "digital", music_page: mp }, 200, 100);
+  await setAll([cached], withPlayer("idle"));
+  const cachedCell = cached.parentElement;
+  cached.remove();
+  cachedCell.appendChild(cached);
+  const beforeCached = navigated;
+  await setAll([cached], withPlayer("playing"));
+  out.musicCached = { path: location.pathname, events: navigated - beforeCached };
+  cached.remove();
   out.weather = text(weather);
   out.calendar = [...calendar.shadowRoot.querySelectorAll(".summary")].map((e) => e.textContent);
   out.calendarBadges = [...calendar.shadowRoot.querySelectorAll(".wd")].map((e) => e.textContent);
@@ -1065,6 +1077,7 @@ if (!/^\d{2}:\d{2}$/.test(c.digital.time ?? "") || !c.digital.date || c.digital.
 if (c.navigate.path !== "/echo-show/music" || c.navigate.events !== 1) fail.push(`tile navigate: ${JSON.stringify(c.navigate)}, expected /echo-show/music and one location-changed`);
 if (c.musicOpen.path !== "/echo-show/music" || c.musicOpen.events !== 1) fail.push(`music page: the player starting gave ${JSON.stringify(c.musicOpen)}, expected /echo-show/music and one location-changed from two cards`);
 if (c.musicStays !== "/echo-show/music" || c.musicBack !== "/echo-show/home") fail.push(`music page: paused on the music page it was at ${c.musicStays} after 0.4 s and ${c.musicBack} after 1.4 s, expected to stay, then go home after return_after 1 s`);
+if (c.musicCached.path !== "/echo-show/cameras" || c.musicCached.events !== 0) fail.push(`music page: a reconnected cached card gave ${JSON.stringify(c.musicCached)}, expected to stay on /echo-show/cameras with no location-changed`);
 console.log(JSON.stringify(c));
 if (fail.length) {
   console.error(`WebKit smoke FAILED:\n- ${fail.join("\n- ")}`);
