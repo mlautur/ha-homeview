@@ -141,6 +141,12 @@ export class HomeViewMediaCard extends HomeViewCard<MediaConfig> {
     this.dragging = false;
     this._seek = [v, this.state()?.attributes.media_position_updated_at];
     this.call("media_seek", { seek_position: v });
+    this.seekEnd();
+  };
+
+  /** the finger left the slider, with or without a change event */
+  private seekEnd = (): void => {
+    this.dragging = false;
     // ponytail: a player that never reports the new position would freeze the bar; let it go after 5 s
     clearTimeout(this.seekTimer);
     this.seekTimer = window.setTimeout(() => (this._seek = undefined), 5000);
@@ -148,6 +154,7 @@ export class HomeViewMediaCard extends HomeViewCard<MediaConfig> {
 
   private volumeInput = (e: Event): void => {
     clearTimeout(this.volDone);
+    this.volDone = 0;
     this._volume = Number((e.target as HTMLInputElement).value) / 100;
     this.keepPopover();
     if (Date.now() - this.volSent < VOLUME_MS) return;
@@ -155,11 +162,11 @@ export class HomeViewMediaCard extends HomeViewCard<MediaConfig> {
     this.call("volume_set", { volume_level: this._volume });
   };
 
-  private volumeSet = (e: Event): void => {
-    const v = Number((e.target as HTMLInputElement).value) / 100;
-    this.call("volume_set", { volume_level: v });
+  /** the drag ended (change, release, cancel or blur): send the last level, which the throttle may have skipped */
+  private volumeEnd = (): void => {
+    if (this.volDone || this._volume === undefined) return;
+    this.call("volume_set", { volume_level: this._volume });
     // keep showing it until the player reports it back
-    clearTimeout(this.volDone);
     this.volDone = window.setTimeout(() => (this._volume = undefined), 1500);
   };
 
@@ -248,6 +255,10 @@ export class HomeViewMediaCard extends HomeViewCard<MediaConfig> {
                   ?disabled=${!(f & MEDIA.SEEK)}
                   @input=${this.seeking}
                   @change=${this.seek}
+                  @pointerup=${this.seekEnd}
+                  @pointercancel=${this.seekEnd}
+                  @lostpointercapture=${this.seekEnd}
+                  @blur=${this.seekEnd}
                 />
                 <div class="times"><span>${trackTime(pos)}</span><span>${trackTime(prog.dur)}</span></div>
               </div>`
@@ -275,7 +286,11 @@ export class HomeViewMediaCard extends HomeViewCard<MediaConfig> {
                           style="--p:${vol * 100}%"
                           aria-label="Volume"
                           @input=${this.volumeInput}
-                          @change=${this.volumeSet}
+                          @change=${this.volumeEnd}
+                          @pointerup=${this.volumeEnd}
+                          @pointercancel=${this.volumeEnd}
+                          @lostpointercapture=${this.volumeEnd}
+                          @blur=${this.volumeEnd}
                         />
                         <span class="pct">${Math.round(vol * 100)}</span>
                       </div>`
