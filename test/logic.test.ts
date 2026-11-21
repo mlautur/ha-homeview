@@ -323,6 +323,10 @@ test("clock: digital time follows the profile's 12 / 24 hour setting, without AM
   assert.equal(clockText(d, "en-GB", "language").time, "15:07");
   assert.equal(clockText(d, "en-GB", "12").time, "3:07");
   assert.equal(clockText(new Date(Date.UTC(2026, 10, 21, 23, 30)), "en-US", "24", "Asia/Tokyo").time, "08:30");
+  const midnight = new Date(2026, 10, 21, 0, 5);
+  assert.equal(clockText(midnight, "en-US", "24").time, "00:05");
+  assert.equal(clockText(midnight, "ja", "12").time, "12:05");
+  assert.equal(clockText(midnight, "en-US", "12").time, "12:05");
 });
 
 test("weather: forecast days from a daily or a twice-daily forecast", () => {

@@ -105,8 +105,8 @@ export function nowIn(timeZone?: string, d = new Date()): { h: number; m: number
  */
 export function clockText(d: Date, language?: string, timeFormat?: string, timeZone?: string): { time: string; date: string } {
   const locale = timeFormat === "system" ? undefined : language;
-  const hour12 = timeFormat === "12" ? true : timeFormat === "24" ? false : undefined;
-  const parts = new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", hour12, timeZone }).formatToParts(d);
+  const hourCycle = timeFormat === "12" ? "h12" : timeFormat === "24" ? "h23" : undefined;
+  const parts = new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", hourCycle, timeZone }).formatToParts(d);
   const time = parts
     .filter((p) => p.type !== "dayPeriod")
     .map((p) => p.value)
