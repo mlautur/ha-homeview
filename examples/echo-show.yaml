@@ -103,6 +103,8 @@ views:
       # Now Playing on the Echo's own speaker
       - type: custom:homeview-media-card
         entity: media_player.kitchen_display
+        name: Echo Show
+        navigation_path: /echo-show/home
 
   - title: Cameras
     path: cameras
@@ -111,19 +113,17 @@ views:
     cards:
       # one live camera edge to edge; swipe for the next
       - type: custom:homeview-camera-card
+        home_path: /echo-show/home
+        crop_top: 7           # every camera: hides the burned-in timestamp
         entities:
           - entity: camera.front_door
             name: Front Door
-            crop_top: 7
           - entity: camera.backyard_dome
             name: Backyard Dome
-            crop_top: 7
           - entity: camera.backyard
             name: Backyard
-            crop_top: 7
           - entity: camera.garage
             name: Garage
-            crop_top: 7
 
   - title: Weather
     path: weather
