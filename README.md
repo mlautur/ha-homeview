@@ -13,6 +13,7 @@ A card pack that brings an Apple HomeView-style wall panel to Home Assistant. Re
 | Up next | `custom:homeview-calendar-card` | A strip with the next events from one or more calendars. |
 | Camera | `custom:homeview-camera-card` | Snapshot tile, refreshed every few seconds. Tap for the live stream full screen. |
 | Vacuum | `custom:homeview-vacuum-card` | Robot vacuum tile. Tap for a panel with the map, rooms, start / pause / dock / locate, suction and mop modes. |
+| Now Playing | `custom:homeview-media-card` | One media player full screen: album art over a blurred copy of it, a seekable progress bar, previous / play / next, volume, shuffle and repeat. |
 
 Every card works like a built-in card in the **Sections** view:
 - add it from the card picker (search "HomeView");
@@ -202,6 +203,37 @@ The tile shows the status and battery ("Docked · 100%"). It turns while the rob
 - suction, and a row of choices for each `modes` select.
 
 Tap outside the panel, swipe down or press Escape to close it. Hold the tile for Home Assistant's own dialog.
+
+```yaml
+type: custom:homeview-media-card
+entity: media_player.echo_show
+name: Echo Show           # optional; shown when nothing is playing
+navigation_path: /echo-show/home   # optional: a close button top right goes there
+```
+
+A full-screen Now Playing screen, laid out for a landscape wall panel or an Echo Show (drawn at 960x480, scaled to any size):
+- the album art on the left, over a blurred copy of it that fills the screen;
+- the title, artist and album; a long title is cut to one line;
+- a progress bar that runs on between Home Assistant's updates. Drag it to seek;
+- previous, play / pause and next;
+- volume, shuffle and repeat (off, all, one). Volume opens a slider beside its button; a tap elsewhere closes it, and so does leaving it alone for 5 seconds.
+
+Buttons the player does not support are hidden (volume, shuffle, repeat) or dimmed (previous, next, seek). When nothing is playing, the card shows an empty art frame, *Not playing* and the player's name over the wallpaper, and play resumes the player. The card controls only its own player: there is no speaker picker. On a portrait screen the art sits above the controls.
+
+Put it in a **panel** view so it fills the screen:
+
+```yaml
+views:
+  - title: Music
+    path: music
+    type: panel
+    cards:
+      - type: custom:homeview-media-card
+        entity: media_player.echo_show
+        navigation_path: /echo-show/home
+```
+
+In a Sections view it spans the full width and 8 rows by default.
 
 ### Swipe Navigation
 

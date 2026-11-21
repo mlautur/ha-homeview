@@ -35,6 +35,13 @@ export const ICONS: Record<string, SVGTemplateResult> = {
   retry: g(svg`<path d="M19 12a7 7 0 1 1-2.05-4.95" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M20 3.6v6h-6z"/>`),
   stop: g(svg`<rect x="6" y="6" width="12" height="12" rx="2.5"/>`),
   close: svg`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
+  previous: g(svg`<rect x="4" y="5" width="2.6" height="14" rx="1.1"/><path d="M19.5 6.3v11.4c0 .9-1 1.4-1.7.9L9.4 12.9a1.1 1.1 0 0 1 0-1.8l8.4-5.7c.7-.5 1.7 0 1.7.9z"/>`),
+  next: g(svg`<rect x="17.4" y="5" width="2.6" height="14" rx="1.1"/><path d="M4.5 6.3v11.4c0 .9 1 1.4 1.7.9l8.4-5.7a1.1 1.1 0 0 0 0-1.8L6.2 5.4c-.7-.5-1.7 0-1.7.9z"/>`),
+  shuffle: g(svg`<g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h3.2c1.6 0 3 .8 3.9 2.1l3.8 5.8c.9 1.3 2.3 2.1 3.9 2.1H20M3 17h3.2c1.6 0 3-.8 3.9-2.1l.5-.8M13.4 9.9l.5-.8C14.8 7.8 16.2 7 17.8 7H20"/><path d="M17.5 4.5 20 7l-2.5 2.5M17.5 14.5 20 17l-2.5 2.5"/></g>`),
+  repeat: g(svg`<g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11V9.5A3.5 3.5 0 0 1 7.5 6H19M20 13v1.5a3.5 3.5 0 0 1-3.5 3.5H5"/><path d="M16.5 3.5 19 6l-2.5 2.5M7.5 20.5 5 18l2.5-2.5"/></g>`),
+  repeatOne: g(svg`<g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11V9.5A3.5 3.5 0 0 1 7.5 6H19M20 13v1.5a3.5 3.5 0 0 1-3.5 3.5H5"/><path d="M16.5 3.5 19 6l-2.5 2.5M7.5 20.5 5 18l2.5-2.5"/></g><path d="M10.5 10.6 12.3 9.5v5.2" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>`),
+  volume: g(svg`<path d="M3 9.6v4.8c0 .6.5 1.1 1.1 1.1h2.7l4 3.6c.6.5 1.5.1 1.5-.7V5.6c0-.8-.9-1.2-1.5-.7l-4 3.6H4.1C3.5 8.5 3 9 3 9.6z"/><path d="M15.5 8.6a4.6 4.6 0 0 1 0 6.8M18.2 6a8.4 8.4 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>`),
+  volumeOff: g(svg`<path d="M3 9.6v4.8c0 .6.5 1.1 1.1 1.1h2.7l4 3.6c.6.5 1.5.1 1.5-.7V5.6c0-.8-.9-1.2-1.5-.7l-4 3.6H4.1C3.5 8.5 3 9 3 9.6z"/><path d="M15.5 9.5l5 5M20.5 9.5l-5 5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>`),
   send: g(svg`<path d="M3.4 11.2 19.6 4.1c.8-.3 1.6.5 1.3 1.3l-7.1 16.2c-.3.8-1.5.7-1.7-.1l-1.6-6.2-6.2-1.6c-.8-.2-.9-1.4-.1-1.7z"/>`),
 };
 
