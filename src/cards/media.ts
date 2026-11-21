@@ -35,8 +35,11 @@ export class HomeViewMediaCard extends HomeViewCard<MediaConfig> {
   private _vol = false;
   /** the art URL that failed to load */
   private _artFailed = "";
+  /** a finger is on the progress slider */
+  private dragging = false;
   private ticker = 0;
   private seekTimer = 0;
+  private volDone = 0;
   private volTimer = 0;
   private volSent = 0;
 
@@ -67,12 +70,9 @@ export class HomeViewMediaCard extends HomeViewCard<MediaConfig> {
     return false;
   }
 
-  /** side by side from slightly wider than tall; stacked on a portrait screen */
+  /** the layout is drawn for 960x480 landscape: everything scales with --hv-ref / 480 */
   protected refFrom(w: number, h: number): number {
-    const landscape = w > h * 1.15;
-    this.toggleAttribute("landscape", landscape);
-    // the layout is drawn for 960x480: everything scales with --hv-ref / 480
-    return landscape ? Math.min(h, w / 2) : Math.min(w * 1.07, (h - 96) * 0.72);
+    return Math.min(h, w / 2);
   }
 
   connectedCallback(): void {
@@ -90,6 +90,7 @@ export class HomeViewMediaCard extends HomeViewCard<MediaConfig> {
     this.tick(false);
     clearTimeout(this.seekTimer);
     clearTimeout(this.volTimer);
+    clearTimeout(this.volDone);
   }
 
   private onVisible = (): void => this.resume();
@@ -118,7 +119,7 @@ export class HomeViewMediaCard extends HomeViewCard<MediaConfig> {
     this.resume();
     // the player reported a new position: the seek landed
     const s = this.state();
-    if (this._seek && s && s.attributes.media_position_updated_at !== this._seek[1]) this._seek = undefined;
+    if (this._seek && !this.dragging && s && s.attributes.media_position_updated_at !== this._seek[1]) this._seek = undefined;
   }
 
   private state() {
@@ -130,12 +131,14 @@ export class HomeViewMediaCard extends HomeViewCard<MediaConfig> {
   }
 
   private seeking = (e: Event): void => {
-    // held against the position Home Assistant last reported, so other updates mid-drag leave it alone
+    this.dragging = true;
+    clearTimeout(this.seekTimer);
     this._seek = [Number((e.target as HTMLInputElement).value), this.state()?.attributes.media_position_updated_at];
   };
 
   private seek = (e: Event): void => {
     const v = Number((e.target as HTMLInputElement).value);
+    this.dragging = false;
     this._seek = [v, this.state()?.attributes.media_position_updated_at];
     this.call("media_seek", { seek_position: v });
     // ponytail: a player that never reports the new position would freeze the bar; let it go after 5 s
@@ -144,6 +147,7 @@ export class HomeViewMediaCard extends HomeViewCard<MediaConfig> {
   };
 
   private volumeInput = (e: Event): void => {
+    clearTimeout(this.volDone);
     this._volume = Number((e.target as HTMLInputElement).value) / 100;
     this.keepPopover();
     if (Date.now() - this.volSent < VOLUME_MS) return;
@@ -155,7 +159,8 @@ export class HomeViewMediaCard extends HomeViewCard<MediaConfig> {
     const v = Number((e.target as HTMLInputElement).value) / 100;
     this.call("volume_set", { volume_level: v });
     // keep showing it until the player reports it back
-    setTimeout(() => (this._volume = undefined), 1500);
+    clearTimeout(this.volDone);
+    this.volDone = window.setTimeout(() => (this._volume = undefined), 1500);
   };
 
   private toggleVolume = (): void => {
@@ -341,31 +346,21 @@ export class HomeViewMediaCard extends HomeViewCard<MediaConfig> {
         position: absolute;
         inset: 0;
         display: flex;
-        flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: calc(var(--u) * 28);
-        padding: calc(var(--u) * 72) calc(var(--u) * 24) calc(var(--u) * 24);
-        box-sizing: border-box;
-      }
-      :host([landscape]) .np {
-        flex-direction: row;
         gap: calc(var(--u) * 40);
         padding: 0 calc(var(--u) * 40) 0 calc(var(--u) * 56);
+        box-sizing: border-box;
       }
       .art {
         flex: none;
-        width: calc(var(--u) * 300);
-        height: calc(var(--u) * 300);
+        width: calc(var(--u) * 352);
+        height: calc(var(--u) * 352);
         border-radius: calc(var(--u) * 24);
         overflow: hidden;
         box-shadow:
           0 0 0 0.75px rgb(60 46 32 / 0.25),
           0 calc(var(--u) * 14) calc(var(--u) * 36) rgb(20 12 10 / 0.35);
-      }
-      :host([landscape]) .art {
-        width: calc(var(--u) * 352);
-        height: calc(var(--u) * 352);
       }
       .art img {
         width: 100%;
@@ -411,13 +406,9 @@ export class HomeViewMediaCard extends HomeViewCard<MediaConfig> {
         line-height: 1.15;
         max-width: 100%;
         display: -webkit-box;
-        -webkit-line-clamp: 2;
+        -webkit-line-clamp: 1;
         -webkit-box-orient: vertical;
         overflow: hidden;
-      }
-      /* side by side, one line as on the reference, so a long title stays clear of the close button */
-      :host([landscape]) .col .title {
-        -webkit-line-clamp: 1;
       }
       .artist,
       .album {

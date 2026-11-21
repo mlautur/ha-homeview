@@ -1861,7 +1861,7 @@ try { registerProcessor("homeview-recorder", HomeViewRecorder); } catch {}
           transform: rotate(360deg);
         }
       }
-    `];customElements.get("homeview-vacuum-panel")||customElements.define("homeview-vacuum-panel",De);customElements.define("homeview-vacuum-card",Ie);L("homeview-vacuum-card","HomeView Vacuum","Robot vacuum tile with a glass panel: map, rooms, start / pause / dock and suction.");var nr=250,ar=5e3,ve=class extends M{constructor(){super(...arguments);this._now=Date.now();this._vol=!1;this._artFailed="";this.ticker=0;this.seekTimer=0;this.volTimer=0;this.volSent=0;this.onVisible=()=>this.resume();this.seeking=e=>{var t;this._seek=[Number(e.target.value),(t=this.state())==null?void 0:t.attributes.media_position_updated_at]};this.seek=e=>{var s;let t=Number(e.target.value);this._seek=[t,(s=this.state())==null?void 0:s.attributes.media_position_updated_at],this.call("media_seek",{seek_position:t}),clearTimeout(this.seekTimer),this.seekTimer=window.setTimeout(()=>this._seek=void 0,5e3)};this.volumeInput=e=>{this._volume=Number(e.target.value)/100,this.keepPopover(),!(Date.now()-this.volSent<nr)&&(this.volSent=Date.now(),this.call("volume_set",{volume_level:this._volume}))};this.volumeSet=e=>{let t=Number(e.target.value)/100;this.call("volume_set",{volume_level:t}),setTimeout(()=>this._volume=void 0,1500)};this.toggleVolume=()=>{this._vol=!this._vol,this.keepPopover()};this.onOutside=e=>{if(!this._vol)return;let t=this.renderRoot.querySelector(".volwrap");t&&!e.composedPath().includes(t)&&(this._vol=!1)};this.onKey=e=>{e.key==="Escape"&&this._vol&&(this._vol=!1)};this.close=()=>{var t;let e=(t=this._config)==null?void 0:t.navigation_path;e&&(history.pushState(null,"",e),D(window,"location-changed",{replace:!1}))}}static getStubConfig(e){return{entity:Object.keys(e.states).find(t=>O(t)==="media_player")??""}}validate(e){if(!e.entity||O(e.entity)!=="media_player")throw new Error("Pick a media player entity")}getGridOptions(){return{columns:"full",rows:8,min_columns:6,min_rows:4}}getCardSize(){return 8}get square(){return!1}refFrom(e,t){let s=e>t*1.15;return this.toggleAttribute("landscape",s),s?Math.min(t,e/2):Math.min(e*1.07,(t-96)*.72)}connectedCallback(){super.connectedCallback(),document.addEventListener("visibilitychange",this.onVisible),document.addEventListener("pointerdown",this.onOutside,!0),window.addEventListener("keydown",this.onKey)}disconnectedCallback(){super.disconnectedCallback(),document.removeEventListener("visibilitychange",this.onVisible),document.removeEventListener("pointerdown",this.onOutside,!0),window.removeEventListener("keydown",this.onKey),this.tick(!1),clearTimeout(this.seekTimer),clearTimeout(this.volTimer)}resume(){var e;this._now=Date.now(),this.tick(((e=this.state())==null?void 0:e.state)==="playing"&&this.onScreen&&document.visibilityState!=="hidden")}tick(e){e&&!this.ticker?this.ticker=window.setInterval(()=>{!this.onScreen||document.visibilityState==="hidden"?this.tick(!1):this._now=Date.now()},1e3):!e&&this.ticker&&(clearInterval(this.ticker),this.ticker=0)}updated(e){var s;if((s=super.updated)==null||s.call(this,e),!e.has("hass")&&!e.has("_config"))return;this.resume();let t=this.state();this._seek&&t&&t.attributes.media_position_updated_at!==this._seek[1]&&(this._seek=void 0)}state(){return this._config&&this.hass?this.hass.states[this._config.entity]:void 0}call(e,t={}){var s;(s=this.hass)==null||s.callService("media_player",e,t,{entity_id:this._config.entity})}keepPopover(){clearTimeout(this.volTimer),this._vol&&(this.volTimer=window.setTimeout(()=>this._vol=!1,ar))}render(){let e=this._config;if(!e||!this.hass)return p``;let t=this.state(),s=!t||A(t),n=(t==null?void 0:t.attributes)??{},a=s?0:Number(n.supported_features)||0,o=!!t&&(t.state==="playing"||t.state==="paused"||t.state==="buffering"),l=e.name??(t?U(this.hass,e.entity):e.entity),c=o&&n.entity_picture?this.hass.hassUrl(n.entity_picture):"",h=c&&c!==this._artFailed?c:"",d=o&&n.media_title?String(n.media_title):t?s?"Unavailable":"Not playing":"Player not found",m=o&&n.media_title?String(n.media_artist||n.media_album_artist||n.app_name||""):l,g=o&&n.media_title?String(n.media_album_name||""):"",f=o&&t?Si(t,this._now):null,k=this._seek?this._seek[0]:(f==null?void 0:f.pos)??0,E=(t==null?void 0:t.state)==="playing",x=this._volume??(typeof n.volume_level=="number"?n.volume_level:0),P=!!n.is_volume_muted||x===0,_=n.repeat??"off",v=(y,C,T,R={})=>p`<button
+    `];customElements.get("homeview-vacuum-panel")||customElements.define("homeview-vacuum-panel",De);customElements.define("homeview-vacuum-card",Ie);L("homeview-vacuum-card","HomeView Vacuum","Robot vacuum tile with a glass panel: map, rooms, start / pause / dock and suction.");var nr=250,ar=5e3,ve=class extends M{constructor(){super(...arguments);this._now=Date.now();this._vol=!1;this._artFailed="";this.dragging=!1;this.ticker=0;this.seekTimer=0;this.volDone=0;this.volTimer=0;this.volSent=0;this.onVisible=()=>this.resume();this.seeking=e=>{var t;this.dragging=!0,clearTimeout(this.seekTimer),this._seek=[Number(e.target.value),(t=this.state())==null?void 0:t.attributes.media_position_updated_at]};this.seek=e=>{var s;let t=Number(e.target.value);this.dragging=!1,this._seek=[t,(s=this.state())==null?void 0:s.attributes.media_position_updated_at],this.call("media_seek",{seek_position:t}),clearTimeout(this.seekTimer),this.seekTimer=window.setTimeout(()=>this._seek=void 0,5e3)};this.volumeInput=e=>{clearTimeout(this.volDone),this._volume=Number(e.target.value)/100,this.keepPopover(),!(Date.now()-this.volSent<nr)&&(this.volSent=Date.now(),this.call("volume_set",{volume_level:this._volume}))};this.volumeSet=e=>{let t=Number(e.target.value)/100;this.call("volume_set",{volume_level:t}),clearTimeout(this.volDone),this.volDone=window.setTimeout(()=>this._volume=void 0,1500)};this.toggleVolume=()=>{this._vol=!this._vol,this.keepPopover()};this.onOutside=e=>{if(!this._vol)return;let t=this.renderRoot.querySelector(".volwrap");t&&!e.composedPath().includes(t)&&(this._vol=!1)};this.onKey=e=>{e.key==="Escape"&&this._vol&&(this._vol=!1)};this.close=()=>{var t;let e=(t=this._config)==null?void 0:t.navigation_path;e&&(history.pushState(null,"",e),D(window,"location-changed",{replace:!1}))}}static getStubConfig(e){return{entity:Object.keys(e.states).find(t=>O(t)==="media_player")??""}}validate(e){if(!e.entity||O(e.entity)!=="media_player")throw new Error("Pick a media player entity")}getGridOptions(){return{columns:"full",rows:8,min_columns:6,min_rows:4}}getCardSize(){return 8}get square(){return!1}refFrom(e,t){return Math.min(t,e/2)}connectedCallback(){super.connectedCallback(),document.addEventListener("visibilitychange",this.onVisible),document.addEventListener("pointerdown",this.onOutside,!0),window.addEventListener("keydown",this.onKey)}disconnectedCallback(){super.disconnectedCallback(),document.removeEventListener("visibilitychange",this.onVisible),document.removeEventListener("pointerdown",this.onOutside,!0),window.removeEventListener("keydown",this.onKey),this.tick(!1),clearTimeout(this.seekTimer),clearTimeout(this.volTimer),clearTimeout(this.volDone)}resume(){var e;this._now=Date.now(),this.tick(((e=this.state())==null?void 0:e.state)==="playing"&&this.onScreen&&document.visibilityState!=="hidden")}tick(e){e&&!this.ticker?this.ticker=window.setInterval(()=>{!this.onScreen||document.visibilityState==="hidden"?this.tick(!1):this._now=Date.now()},1e3):!e&&this.ticker&&(clearInterval(this.ticker),this.ticker=0)}updated(e){var s;if((s=super.updated)==null||s.call(this,e),!e.has("hass")&&!e.has("_config"))return;this.resume();let t=this.state();this._seek&&!this.dragging&&t&&t.attributes.media_position_updated_at!==this._seek[1]&&(this._seek=void 0)}state(){return this._config&&this.hass?this.hass.states[this._config.entity]:void 0}call(e,t={}){var s;(s=this.hass)==null||s.callService("media_player",e,t,{entity_id:this._config.entity})}keepPopover(){clearTimeout(this.volTimer),this._vol&&(this.volTimer=window.setTimeout(()=>this._vol=!1,ar))}render(){let e=this._config;if(!e||!this.hass)return p``;let t=this.state(),s=!t||A(t),n=(t==null?void 0:t.attributes)??{},a=s?0:Number(n.supported_features)||0,o=!!t&&(t.state==="playing"||t.state==="paused"||t.state==="buffering"),l=e.name??(t?U(this.hass,e.entity):e.entity),c=o&&n.entity_picture?this.hass.hassUrl(n.entity_picture):"",h=c&&c!==this._artFailed?c:"",d=o&&n.media_title?String(n.media_title):t?s?"Unavailable":"Not playing":"Player not found",m=o&&n.media_title?String(n.media_artist||n.media_album_artist||n.app_name||""):l,g=o&&n.media_title?String(n.media_album_name||""):"",f=o&&t?Si(t,this._now):null,k=this._seek?this._seek[0]:(f==null?void 0:f.pos)??0,E=(t==null?void 0:t.state)==="playing",x=this._volume??(typeof n.volume_level=="number"?n.volume_level:0),P=!!n.is_volume_muted||x===0,_=n.repeat??"off",v=(y,C,T,R={})=>p`<button
         class="g ${R.cls??""} ${R.pressed?"on":""}"
         aria-label=${y}
         aria-pressed=${R.pressed===void 0?u:String(R.pressed)}
@@ -1969,31 +1969,21 @@ try { registerProcessor("homeview-recorder", HomeViewRecorder); } catch {}
         position: absolute;
         inset: 0;
         display: flex;
-        flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: calc(var(--u) * 28);
-        padding: calc(var(--u) * 72) calc(var(--u) * 24) calc(var(--u) * 24);
-        box-sizing: border-box;
-      }
-      :host([landscape]) .np {
-        flex-direction: row;
         gap: calc(var(--u) * 40);
         padding: 0 calc(var(--u) * 40) 0 calc(var(--u) * 56);
+        box-sizing: border-box;
       }
       .art {
         flex: none;
-        width: calc(var(--u) * 300);
-        height: calc(var(--u) * 300);
+        width: calc(var(--u) * 352);
+        height: calc(var(--u) * 352);
         border-radius: calc(var(--u) * 24);
         overflow: hidden;
         box-shadow:
           0 0 0 0.75px rgb(60 46 32 / 0.25),
           0 calc(var(--u) * 14) calc(var(--u) * 36) rgb(20 12 10 / 0.35);
-      }
-      :host([landscape]) .art {
-        width: calc(var(--u) * 352);
-        height: calc(var(--u) * 352);
       }
       .art img {
         width: 100%;
@@ -2039,13 +2029,9 @@ try { registerProcessor("homeview-recorder", HomeViewRecorder); } catch {}
         line-height: 1.15;
         max-width: 100%;
         display: -webkit-box;
-        -webkit-line-clamp: 2;
+        -webkit-line-clamp: 1;
         -webkit-box-orient: vertical;
         overflow: hidden;
-      }
-      /* side by side, one line as on the reference, so a long title stays clear of the close button */
-      :host([landscape]) .col .title {
-        -webkit-line-clamp: 1;
       }
       .artist,
       .album {

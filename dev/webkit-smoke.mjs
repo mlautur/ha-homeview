@@ -778,6 +778,13 @@ result.cards = await cardsPage.evaluate(async () => {
     out.np.later = elapsed();
     for (const l of ["Previous", "Pause", "Next", "Shuffle", "Repeat"]) btn(l).click();
     const seek = q(".prog input");
+    // a position report mid-drag leaves the thumb under the finger
+    seek.value = "120";
+    seek.dispatchEvent(new Event("input"));
+    const echo = hass.states["media_player.echo"];
+    np.hass = { ...hass, states: { ...hass.states, "media_player.echo": { ...echo, attributes: { ...echo.attributes, media_position_updated_at: new Date(Date.now() + 1000).toISOString() } } } };
+    await np.updateComplete;
+    out.np.heldDrag = q(".prog input").value;
     seek.value = "100";
     seek.dispatchEvent(new Event("change"));
     btn("Volume").click();
@@ -993,6 +1000,7 @@ if (!/^0:2[34]$/.test(np.at) || np.later === np.at) fail.push(`now playing: prog
 if (!np.art || !np.backdrop || !np.close) fail.push(`now playing: art ${np.art}, blurred backdrop ${np.backdrop}, close button ${np.close}`);
 if (np.sizes.some((s) => s < 44)) fail.push(`now playing: buttons smaller than 44px (${np.sizes.join(", ")})`);
 if (!np.volumeOpen || !np.volumeClosed) fail.push(`now playing: volume slider open ${np.volumeOpen}, closed by a tap elsewhere ${np.volumeClosed}`);
+if (np.heldDrag !== "120") fail.push(`now playing: a position report mid-drag moved the seek thumb to ${np.heldDrag}, expected it held at 120`);
 if (!np.navigated) fail.push("now playing: the close button did not navigate to its navigation_path");
 if (!/Not playing/.test(np.idle.text) || !/Quiet/.test(np.idle.text) || !np.idle.art || np.idle.prog || np.idle.close || np.idle.next !== true)
   fail.push(`now playing: an idle player shows ${JSON.stringify(np.idle)}, expected Not playing, its name, an empty art frame, no progress, no close button and Next disabled`);
