@@ -82,6 +82,42 @@ export const glassStyles = css`
       inset -1px -1px 0.5px -0.5px rgb(255 255 255 / 0.4),
       inset 0 0 calc(var(--hv-ref, 200px) * 0.035) rgb(50 38 26 / 0.1);
   }
+  /* bare: text straight on the wallpaper, no glass surface (digital clock, full-page layouts) */
+  ha-card.hv-bare {
+    position: relative;
+    box-sizing: border-box;
+    height: 100%;
+    border: none;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    color: var(--hv-ink);
+    font-family: var(--hv-font);
+    -webkit-font-smoothing: antialiased;
+  }
+  /* a glass piece inside a card: frost, with the cards' specular edge */
+  .hv-frost {
+    position: relative;
+    isolation: isolate;
+    border-radius: var(--hv-radius, 24px);
+    background: rgb(84 74 64 / 0.2);
+    backdrop-filter: blur(22px) saturate(1.5) brightness(1.04);
+    -webkit-backdrop-filter: blur(22px) saturate(1.5) brightness(1.04);
+    box-shadow:
+      0 0 0 0.75px rgb(60 46 32 / 0.2),
+      0 calc(var(--hv-ref, 200px) * 0.015) calc(var(--hv-ref, 200px) * 0.045) rgb(60 45 30 / 0.14);
+  }
+  .hv-frost::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow:
+      inset 0 0 0 1px rgb(255 255 255 / 0.16),
+      inset 1.5px 1.5px 0.5px -0.5px rgb(255 255 255 / 0.8),
+      inset -1px -1px 0.5px -0.5px rgb(255 255 255 / 0.4);
+  }
   .hv-content {
     position: relative;
     height: 100%;
@@ -123,6 +159,11 @@ export const glassStyles = css`
     }
     .hv-tint {
       background: rgb(var(--hv-tint-rgb, 84 74 64)) !important;
+    }
+    .hv-frost {
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+      background: rgb(84 74 64) !important;
     }
   }
   @media (prefers-reduced-motion: reduce) {
@@ -204,8 +245,14 @@ export abstract class HomeViewCard<C extends BaseConfig = BaseConfig> extends Li
     return "";
   }
 
+  /** no glass surface: the content sits on the wallpaper (the card still sets the wallpaper) */
+  protected get bare(): boolean {
+    return false;
+  }
+
   protected render(): TemplateResult {
     if (!this._config) return html``;
+    if (this.bare) return html`<ha-card class="hv-bare ${this.cardClass()}"><div class="hv-content">${this.renderContent()}</div></ha-card>`;
     return html`<ha-card class="hv-glass ${this.square ? "square" : ""} ${this.cardClass()}">
       <canvas class="hv-bake" aria-hidden="true"></canvas>
       <div class="hv-tint"></div>
@@ -214,7 +261,21 @@ export abstract class HomeViewCard<C extends BaseConfig = BaseConfig> extends Li
   }
 
   protected firstUpdated(_changed: PropertyValues): void {
+    this.observeCard();
+  }
+
+  protected updated(changed: PropertyValues): void {
+    super.updated(changed);
+    // a config change between glass and bare swaps the ha-card element: size the new one
+    if (this.sizer && this.renderRoot.querySelector("ha-card") !== this.sized) this.observeCard();
+  }
+
+  private sized?: HTMLElement;
+
+  private observeCard(): void {
     const card = this.renderRoot.querySelector<HTMLElement>("ha-card");
+    this.sizer?.disconnect();
+    this.sized = card ?? undefined;
     if (!card) return;
     this.sizer = new ResizeObserver(() => {
       const ref = this.refFrom(card.offsetWidth, card.offsetHeight);
@@ -237,6 +298,6 @@ export abstract class HomeViewCard<C extends BaseConfig = BaseConfig> extends Li
   connectedCallback(): void {
     super.connectedCallback();
     // re-attach the sizer after a move between parents (Sections drag and drop)
-    if (this.hasUpdated && !this.sizer) this.firstUpdated(new Map());
+    if (this.hasUpdated && !this.sizer) this.observeCard();
   }
 }
