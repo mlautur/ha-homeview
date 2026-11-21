@@ -480,3 +480,35 @@ export function vacuumStatus(state: string, battery?: number): string {
 export function roborockRooms(segmentIds: string[]): number[] {
   return segmentIds.map((id) => Number(id.split("_").pop())).filter((n) => Number.isInteger(n));
 }
+
+// ---- now playing ----
+
+/** media_player supported_features bits the Now Playing card uses */
+export const MEDIA = { PAUSE: 1, SEEK: 2, VOLUME_SET: 4, VOLUME_MUTE: 8, PREVIOUS: 16, NEXT: 32, PLAY: 16384, SHUFFLE: 32768, REPEAT: 262144 };
+
+/**
+ * Where the track is now, in seconds, and its length. Home Assistant reports the position only when it
+ * changes, with the time it was read; while playing, the clock has moved on since then.
+ */
+export function mediaProgress(s: HassEntity, now: number): { pos: number; dur: number } | null {
+  const a = s.attributes;
+  const dur = Number(a.media_duration);
+  if (!(dur > 0)) return null;
+  let pos = Number(a.media_position);
+  if (!isFinite(pos)) pos = 0;
+  const at = Date.parse(a.media_position_updated_at ?? "");
+  if (s.state === "playing" && isFinite(at)) pos += (now - at) / 1000;
+  return { pos: Math.min(dur, Math.max(0, pos)), dur };
+}
+
+/** 83 -> "1:23", 3725 -> "1:02:05" */
+export function trackTime(seconds: number): string {
+  const t = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const s = String(t % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
+}
+
+/** repeat button cycle: off -> all -> one -> off */
+export const nextRepeat = (r: unknown): "off" | "all" | "one" => (r === "all" ? "one" : r === "one" ? "off" : "all");

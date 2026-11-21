@@ -313,3 +313,26 @@ test("vacuum: status line and Roborock room ids", () => {
   assert.equal(vacuumStatus("unavailable", 50), "Offline");
   assert.deepEqual(roborockRooms(["0_16", "0_21", "x_y", "22"]), [16, 21, 22]);
 });
+
+import { mediaProgress, nextRepeat, trackTime } from "../src/logic.ts";
+
+test("now playing: position runs on from the last report while playing, clamped to the track", () => {
+  const at = "2026-11-21T10:00:00Z";
+  const t0 = Date.parse(at);
+  const s = (state: string, a: Record<string, unknown>) => ({ entity_id: "media_player.x", state, attributes: a });
+  assert.deepEqual(mediaProgress(s("playing", { media_duration: 209, media_position: 23, media_position_updated_at: at }), t0 + 10_000), { pos: 33, dur: 209 });
+  assert.deepEqual(mediaProgress(s("paused", { media_duration: 209, media_position: 23, media_position_updated_at: at }), t0 + 10_000), { pos: 23, dur: 209 });
+  assert.deepEqual(mediaProgress(s("playing", { media_duration: 209, media_position: 200, media_position_updated_at: at }), t0 + 60_000), { pos: 209, dur: 209 });
+  assert.deepEqual(mediaProgress(s("playing", { media_duration: 209 }), t0), { pos: 0, dur: 209 });
+  assert.equal(mediaProgress(s("playing", { media_position: 5 }), t0), null); // a live stream has no length
+});
+
+test("now playing: track times and the repeat cycle", () => {
+  assert.equal(trackTime(0), "0:00");
+  assert.equal(trackTime(83.9), "1:23");
+  assert.equal(trackTime(3725), "1:02:05");
+  assert.equal(nextRepeat("off"), "all");
+  assert.equal(nextRepeat("all"), "one");
+  assert.equal(nextRepeat("one"), "off");
+  assert.equal(nextRepeat(undefined), "all");
+});
