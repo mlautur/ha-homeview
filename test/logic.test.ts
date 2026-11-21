@@ -232,7 +232,7 @@ test("voice: failures become a short status line and keep the full detail", () =
 });
 
 import {
-  calendarTime, dayBadge, eventTime, forecastType, mediaLines, roborockRooms, snapshotUrl, todayOutlook, upcoming, vacuumStatus, weatherName,
+  calendarTime, cameraPages, cropTop, dayBadge, eventTime, forecastType, mediaLines, roborockRooms, snapshotUrl, todayOutlook, upcoming, vacuumStatus, weatherName, pickerColumns, wrap,
 } from "../src/logic.ts";
 
 test("media tile: playing, paused and idle lines; tap toggles play / pause", () => {
@@ -287,6 +287,24 @@ test("calendar: all-day dates are local, ended events drop, soonest first", () =
 test("camera: snapshot URL changes once per interval", () => {
   assert.equal(snapshotUrl("/api/camera_proxy/camera.x?token=t", 25000, 10), "/api/camera_proxy/camera.x?token=t&hv=2");
   assert.equal(snapshotUrl("/a", 9999, 10), "/a?hv=0");
+});
+
+test("camera page: cameras from ids or objects, crop clamped, the card's crop as default", () => {
+  assert.deepEqual(cameraPages(["camera.a", { entity: "camera.b", name: "B", crop_top: 50 }, { entity: "light.x" }, null, 3], 7), [
+    { entity: "camera.a", name: undefined, crop: 7 },
+    { entity: "camera.b", name: "B", crop: 20 },
+  ]);
+  assert.deepEqual(cameraPages([{ entity: "camera.c", crop_top: 0 }], 7), [{ entity: "camera.c", name: undefined, crop: 0 }]);
+  assert.deepEqual(cameraPages(undefined), []);
+  assert.equal(cropTop(-3), 0);
+  assert.equal(cropTop("x"), 0);
+});
+
+test("camera page: swiping wraps around, picker columns", () => {
+  assert.equal(wrap(4, 4), 0);
+  assert.equal(wrap(-1, 4), 3);
+  assert.equal(wrap(5, 0), 0);
+  assert.deepEqual([1, 2, 3, 4, 5, 6].map(pickerColumns), [1, 2, 3, 2, 3, 3]);
 });
 
 test("vacuum: status line and Roborock room ids", () => {

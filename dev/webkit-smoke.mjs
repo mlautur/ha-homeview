@@ -16,7 +16,9 @@
 // or a vertical drag changes it, or a tap does not open a full-screen slideshow that covers the screen,
 // swipes along with the card, and closes on a swipe down, on Escape and by itself after 3 hours.
 // or if the weather, up next, camera, vacuum or media cards show the wrong data, make the wrong service calls, or their
-// full-screen live view / vacuum panel does not open and close.
+// full-screen live view / vacuum panel does not open and close,
+// or if the camera card's page mode does not stream just the camera on screen, swipe (wrapping) between cameras
+// while ignoring vertical drags, unmute, pick from its grid, or go home.
 // One-time setup: npx playwright-core install webkit. Run: npm run test:webkit
 import { readFileSync } from "node:fs";
 import http from "node:http";
@@ -689,6 +691,7 @@ result.cards = await cardsPage.evaluate(async () => {
   moved.appendChild(movedCal);
   const vacuum = await make("homeview-vacuum-card", { entity: "vacuum.robot", modes: ["select.robot_mop"], grid_options: { rows: 3 } }, 234, 184);
   const media = await make("homeview-tile-card", { entity: "media_player.room", grid_options: { rows: 3 } }, 234, 184);
+  const camPage = await make("homeview-camera-card", { entities: [{ entity: "camera.door", name: "Front", crop_top: 7 }, "camera.gone", { entity: "camera.door", name: "Back" }], home_path: "/echo-show/home" }, 960, 480);
   await wait(600);
   out.weather = text(weather);
   out.calendar = [...calendar.shadowRoot.querySelectorAll(".summary")].map((e) => e.textContent);
@@ -704,6 +707,46 @@ result.cards = await cardsPage.evaluate(async () => {
   out.movedCalendar = text(movedCal);
   out.vacuum = text(vacuum);
   out.media = text(media);
+  // camera page: only the camera on screen streams; swipes (pointer drags) step and wrap, a vertical drag does not
+  const pg = camPage.shadowRoot.querySelector("homeview-camera-page");
+  const pq = (s) => pg.shadowRoot.querySelector(s);
+  const pageNow = () => ({ name: pq(".pill-name")?.textContent, live: [...pg.shadowRoot.querySelectorAll("img.live")].map((i) => i.getAttribute("src")), mute: pq(".mute").getAttribute("aria-label"), dots: pg.shadowRoot.querySelectorAll(".dots i").length });
+  const drag = async (dx, dy) => {
+    const st = pq(".stage");
+    const ev = (type, x, y) => st.dispatchEvent(new PointerEvent(type, { pointerId: 7, pointerType: "touch", isPrimary: true, clientX: x, clientY: y, bubbles: true, composed: true }));
+    ev("pointerdown", 500, 240);
+    for (let i = 1; i <= 5; i++) ev("pointermove", 500 + (dx * i) / 5, 240 + (dy * i) / 5);
+    ev("pointerup", 500 + dx, 240 + dy);
+    await wait(700);
+  };
+  // below the fold it streams nothing; scrolled into view, the camera on screen streams
+  out.camPage = { hidden: pageNow() };
+  camPage.scrollIntoView();
+  await wait(300);
+  out.camPage.first = pageNow();
+  const pr = camPage.getBoundingClientRect();
+  out.camPage.size = [pr.width, pr.height];
+  out.camPage.frameTop = pg.shadowRoot.querySelectorAll(".cam .frame")[1]?.style.top; // [-1, 0, 1]: the one on screen
+  await drag(-300, 0);
+  out.camPage.left = pageNow();
+  out.camPage.offlineHint = pq(".empty")?.textContent.trim();
+  await drag(0, 200);
+  out.camPage.vertical = pageNow();
+  await drag(300, 0);
+  await drag(300, 0);
+  out.camPage.wrapped = pageNow();
+  pq(".mute").click();
+  await wait(50);
+  out.camPage.unmuted = pageNow();
+  pq(".grid-btn").click();
+  await wait(50);
+  out.camPage.tiles = [...pg.shadowRoot.querySelectorAll(".tile")].map((t) => t.textContent.trim());
+  pg.shadowRoot.querySelectorAll(".tile")[0].click();
+  await wait(100);
+  out.camPage.picked = pageNow();
+  out.camPage.pickerClosed = !pq(".picker");
+  pq(".home").click();
+  out.camPage.path = location.pathname;
   // media tile: a tap plays / pauses
   media.shadowRoot.querySelector("button").click();
   // camera: a tap opens the live view full screen (no Home Assistant player here: the MJPEG stream); Escape closes it
@@ -871,9 +914,22 @@ for (const [svc, entity, data] of want)
 if (c.calls.length !== want.length) fail.push(`unexpected service calls: ${JSON.stringify(c.calls)}`);
 if (!c.panelClosed) fail.push("vacuum: a tap outside the panel did not close it");
 if (!/Song/.test(c.media) || !/Band/.test(c.media)) fail.push(`media tile: shows "${c.media}", expected the title and artist`);
+const cp = c.camPage;
+const doorLive = (s) => s.live.length === 1 && s.live[0].includes("/api/camera_proxy_stream/camera.door");
+if (cp.size.join() !== "960,480") fail.push(`camera page: card is ${cp.size.join("x")} in a 960x480 cell, expected to fill it`);
+if (cp.hidden.live.length) fail.push("camera page: streams while scrolled out of view");
+if (cp.first.name !== "Front" || !doorLive(cp.first) || cp.first.mute !== "Unmute" || cp.first.dots !== 3) fail.push(`camera page: opens as ${JSON.stringify(cp.first)}, expected Front, one live stream, muted, 3 dots`);
+if (cp.frameTop !== "-7%") fail.push(`camera page: crop_top 7 gives frame top ${cp.frameTop}`);
+if (cp.left.name !== "Gone" || cp.left.live.length || !/Offline/.test(cp.offlineHint ?? "")) fail.push(`camera page: a swipe left shows ${JSON.stringify(cp.left)} / "${cp.offlineHint}", expected the offline camera, no stream`);
+if (cp.vertical.name !== "Gone") fail.push(`camera page: a vertical drag changed the camera to ${cp.vertical.name}`);
+if (cp.wrapped.name !== "Back" || !doorLive(cp.wrapped)) fail.push(`camera page: two swipes right from the second camera show ${JSON.stringify(cp.wrapped)}, expected to wrap to the last (Back) with its stream`);
+if (cp.unmuted.mute !== "Mute") fail.push("camera page: the speaker button did not unmute");
+if (cp.tiles.join() !== "Front,Gone,Back") fail.push(`camera page: picker shows ${cp.tiles.join(", ")}, expected Front, Gone, Back`);
+if (cp.picked.name !== "Front" || !cp.pickerClosed || cp.picked.mute !== "Unmute") fail.push(`camera page: picking Front shows ${JSON.stringify(cp.picked)} (picker closed: ${cp.pickerClosed}), expected Front, muted again, picker closed`);
+if (cp.path !== "/echo-show/home") fail.push(`camera page: the home button went to ${cp.path}, expected /echo-show/home`);
 console.log(JSON.stringify(c));
 if (fail.length) {
   console.error(`WebKit smoke FAILED:\n- ${fail.join("\n- ")}`);
   process.exit(1);
 }
-console.log("WebKit smoke passed: 5 cards defined and rendered, weather / up next / camera / vacuum / media tile show their data and make the right calls, camera live view and vacuum panel open and close, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly, photo frame recovers from lost answers, swipes and opens / closes its full-screen slideshow");
+console.log("WebKit smoke passed: 5 cards defined and rendered, weather / up next / camera / vacuum / media tile show their data and make the right calls, camera live view and vacuum panel open and close, camera page streams one camera, swipes, wraps, unmutes, picks and goes home, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly, photo frame recovers from lost answers, swipes and opens / closes its full-screen slideshow");
