@@ -16,7 +16,9 @@
 // or a vertical drag changes it, or a tap does not open a full-screen slideshow that covers the screen,
 // swipes along with the card, and closes on a swipe down, on Escape and by itself after 3 hours.
 // or if the weather, up next, camera, vacuum or media cards show the wrong data, make the wrong service calls, or their
-// full-screen live view / vacuum panel does not open and close.
+// full-screen live view / vacuum panel does not open and close,
+// or if the digital clock, the calendar's day and list layouts, the weather page or a tile's navigate tap go wrong
+// (wrong text, glass where the text should sit on the wallpaper, a free/busy event without "Busy", no navigation).
 // One-time setup: npx playwright-core install webkit. Run: npm run test:webkit
 import { readFileSync } from "node:fs";
 import http from "node:http";
@@ -607,7 +609,7 @@ await cardsPage.addScriptTag({
 });
 await cardsPage.addScriptTag({ type: "module", content: bundle });
 result.cards = await cardsPage.evaluate(async () => {
-  const tags = ["weather", "calendar", "camera", "vacuum", "tile"].map((n) => `homeview-${n}-card`);
+  const tags = ["weather", "calendar", "camera", "vacuum", "tile", "clock"].map((n) => `homeview-${n}-card`);
   await Promise.all(tags.map((n) => customElements.whenDefined(n)));
   const st = (entity_id, state, attributes = {}) => ({ entity_id, state, attributes, last_changed: "", last_updated: "", context: { id: "" } });
   const day = (d, h, m = 0) => { const x = new Date(); x.setDate(x.getDate() + d); x.setHours(h, m, 0, 0); return x.toISOString(); };
@@ -617,10 +619,12 @@ result.cards = await cardsPage.evaluate(async () => {
   const forecast = { forecast: [{ datetime: date(0), condition: "rainy", temperature: 71.4, templow: 53.6, precipitation_probability: 40 }] };
   const hass = {
     language: "en-US",
+    locale: { language: "en-US", time_format: "24" },
     states: {
       "weather.home": st("weather.home", "partlycloudy", { temperature: 64.2, supported_features: 1, friendly_name: "Home" }),
       "calendar.family": st("calendar.family", "off"),
       "calendar.school": st("calendar.school", "off"),
+      "calendar.busy": st("calendar.busy", "off"),
       "camera.door": st("camera.door", "idle", { entity_picture: "/api/camera_proxy/camera.door?token=t", access_token: "t", friendly_name: "Door" }),
       "camera.gone": st("camera.gone", "unavailable", { friendly_name: "Gone" }),
       "camera.broken": st("camera.broken", "idle", { entity_picture: "/api/camera_proxy/camera.broken?token=t", access_token: "t", friendly_name: "Broken" }),
@@ -645,6 +649,8 @@ result.cards = await cardsPage.evaluate(async () => {
         return { response: {
           "calendar.family": { events: [{ summary: "Later", start: day(3, 9), end: day(3, 10) }, { summary: "Over", start: day(0, 0, 1), end: day(0, 0, 2) }, { summary: "Holiday", start: date(1), end: date(2) }] },
           "calendar.school": { events: [{ summary: "Now", start: day(-1, 23), end: day(1, 1) }, { summary: "Far", start: day(5, 9), end: day(5, 10) }] },
+          // a free/busy-only shared calendar: no title
+          "calendar.busy": { events: [{ summary: "", start: day(2, 9), end: day(2, 10) }] },
         } };
       if (m.type === "vacuum/get_segments") return { segments: [{ id: "0_16", name: "Kitchen" }, { id: "0_17", name: "Office" }] };
       return {};
@@ -658,6 +664,7 @@ result.cards = await cardsPage.evaluate(async () => {
     const cell = document.body.appendChild(document.createElement("div"));
     cell.style.cssText = `width:${w}px;height:${h}px;margin:8px;display:inline-block;vertical-align:top`;
     const el = document.createElement(tag);
+    el.layout = "grid"; // Home Assistant sets this on every card
     el.setConfig(config);
     el.hass = hass;
     cell.appendChild(el);
@@ -689,7 +696,23 @@ result.cards = await cardsPage.evaluate(async () => {
   moved.appendChild(movedCal);
   const vacuum = await make("homeview-vacuum-card", { entity: "vacuum.robot", modes: ["select.robot_mop"], grid_options: { rows: 3 } }, 234, 184);
   const media = await make("homeview-tile-card", { entity: "media_player.room", grid_options: { rows: 3 } }, 234, 184);
+  const three = ["calendar.family", "calendar.school", "calendar.busy"];
+  const dayCal = await make("homeview-calendar-card", { layout: "day", entities: three }, 448, 208);
+  const listCal = await make("homeview-calendar-card", { layout: "list", entities: three }, 960, 480);
+  const page = await make("homeview-weather-card", { entity: "weather.home", forecast_days: 4 }, 960, 480);
+  const digital = await make("homeview-clock-card", { face: "digital" }, 448, 208);
+  const goes = await make("homeview-tile-card", { entity: "media_player.room", tap_action: "navigate", navigation_path: "/echo-show/music", grid_options: { rows: 3 } }, 234, 184);
   await wait(600);
+  const all = (el, sel) => [...el.shadowRoot.querySelectorAll(sel)].map((e) => e.textContent.replace(/\s+/g, " ").trim());
+  const glassy = (el) => !!el.shadowRoot.querySelector("canvas.hv-bake, .hv-glass");
+  out.day = { head: all(dayCal, ".dtitle")[0], titles: all(dayCal, ".summary"), when: all(dayCal, ".when") };
+  out.list = { titles: all(listCal, ".ltitle"), rel: all(listCal, ".rel"), today: !!listCal.shadowRoot.querySelector(".lbadge.today.hv-frost"), glassy: glassy(listCal) };
+  out.page = { text: text(page), days: all(page, ".dn"), glassy: glassy(page), frost: !!page.shadowRoot.querySelector(".days.hv-frost") };
+  out.digital = { time: all(digital, ".time")[0], date: all(digital, ".date")[0], glassy: glassy(digital) };
+  let navigated = 0;
+  window.addEventListener("location-changed", () => navigated++);
+  goes.shadowRoot.querySelector("button").click();
+  out.navigate = { path: location.pathname, events: navigated };
   out.weather = text(weather);
   out.calendar = [...calendar.shadowRoot.querySelectorAll(".summary")].map((e) => e.textContent);
   out.calendarBadges = [...calendar.shadowRoot.querySelectorAll(".wd")].map((e) => e.textContent);
@@ -871,9 +894,17 @@ for (const [svc, entity, data] of want)
 if (c.calls.length !== want.length) fail.push(`unexpected service calls: ${JSON.stringify(c.calls)}`);
 if (!c.panelClosed) fail.push("vacuum: a tap outside the panel did not close it");
 if (!/Song/.test(c.media) || !/Band/.test(c.media)) fail.push(`media tile: shows "${c.media}", expected the title and artist`);
+if (c.day.head !== "Today" || c.day.titles.join() !== "Now,Holiday,Busy" || !/^Tomorrow · All day$/.test(c.day.when[1] ?? ""))
+  fail.push(`calendar day: ${JSON.stringify(c.day)}, expected Today with Now, then Holiday (Tomorrow · All day) and the untitled event as Busy`);
+if (c.list.titles.join() !== "Now,Holiday,Busy,Later" || c.list.rel.join() !== "today,tomorrow,in 2 days,in 3 days" || !c.list.today || c.list.glassy)
+  fail.push(`calendar list: ${JSON.stringify(c.list)}, expected 4 rows today / tomorrow / in 2 / in 3 days, today's badge on glass and no glass card`);
+if (!/Partly Cloudy/.test(c.page.text) || !/64°/.test(c.page.text) || !/71° \/ 54° · 40% rain/.test(c.page.text) || c.page.days.join() !== "Today" || c.page.glassy || !c.page.frost)
+  fail.push(`weather page: ${JSON.stringify(c.page)}, expected the condition, 64°, "71° / 54° · 40% rain", a Today column on a glass row and no glass card`);
+if (!/^\d{2}:\d{2}$/.test(c.digital.time ?? "") || !c.digital.date || c.digital.glassy) fail.push(`digital clock: ${JSON.stringify(c.digital)}, expected a 24-hour time from the profile, the date and no glass`);
+if (c.navigate.path !== "/echo-show/music" || c.navigate.events !== 1) fail.push(`tile navigate: ${JSON.stringify(c.navigate)}, expected /echo-show/music and one location-changed`);
 console.log(JSON.stringify(c));
 if (fail.length) {
   console.error(`WebKit smoke FAILED:\n- ${fail.join("\n- ")}`);
   process.exit(1);
 }
-console.log("WebKit smoke passed: 5 cards defined and rendered, weather / up next / camera / vacuum / media tile show their data and make the right calls, camera live view and vacuum panel open and close, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly, photo frame recovers from lost answers, swipes and opens / closes its full-screen slideshow");
+console.log("WebKit smoke passed: 5 cards defined and rendered, weather / up next / camera / vacuum / media tile show their data and make the right calls, digital clock / day and list calendars / weather page / tile navigate right, camera live view and vacuum panel open and close, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly, photo frame recovers from lost answers, swipes and opens / closes its full-screen slideshow");

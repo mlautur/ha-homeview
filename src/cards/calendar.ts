@@ -1,6 +1,8 @@
 /**
  * HomeView "Up next": a glass strip with the next few events from one or more calendars, each
  * with a day badge, its title, a dot in its calendar's colour and its time (or "All day").
+ * `layout: day` is a glass panel with what is left of today, or what's next once today is done;
+ * `layout: list` is a full-page agenda on the wallpaper, one row per event with a date badge.
  * Events come from calendar.get_events, read again every 15 minutes and whenever a calendar
  * starts or ends an event; nothing is read while the card is hidden.
  */
@@ -9,7 +11,7 @@ import { HomeViewCard, glassStyles, type BaseConfig } from "./base.ts";
 import { domainOf, registerCard, type GridOptions, type Hass } from "../ha.ts";
 import type { EditorField } from "../editor.ts";
 import { ICONS } from "../icons.ts";
-import { dayBadge, eventTime, upcoming, within, type CalendarEvent } from "../logic.ts";
+import { calendarTime, capitalize, dayAgenda, dayBadge, daysUntil, eventTime, eventTitle, relativeDay, upcoming, within, type CalendarEvent } from "../logic.ts";
 
 export interface CalendarEntry {
   entity: string;
@@ -22,24 +24,32 @@ export interface CalendarConfig extends BaseConfig {
   title?: string;
   /** how far ahead to look, in days (default 7) */
   days?: number;
-  /** at most this many events (default 3; fewer when the strip is narrow) */
+  /** at most this many events (default 3 on the strip, as many as fit otherwise; fewer when there is no room) */
   count?: number;
+  /** strip (default): a row of the next events; day: today, else what's next; list: a full-page agenda */
+  layout?: "strip" | "day" | "list";
 }
+
+const LAYOUTS = ["strip", "day", "list"];
 
 const COLORS = ["#ff9f0a", "#30d158", "#0a84ff", "#bf5af2", "#ff375f", "#64d2ff"];
 const REFRESH_MS = 15 * 60 * 1000;
 const ANSWER_MS = 30 * 1000;
 /** the narrowest an event may get before the strip shows one fewer */
 const EVENT_MIN_PX = 190;
+/** day panel and agenda geometry, in --hv-ref units (kept in step with the styles below) */
+const DAY = { pad: 0.07, head: 0.13, gap: 0.03, row: 0.22 };
+const LIST = { edge: 0.045, row: 0.227 };
 
 export const calendarEntries = (c: CalendarConfig): CalendarEntry[] =>
   (c.entities ?? []).map((e) => (typeof e === "string" ? { entity: e } : e)).map((e, i) => ({ entity: e.entity, color: e.color ?? COLORS[i % COLORS.length] }));
 
 export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
-  static properties = { ...HomeViewCard.properties, _events: { state: true }, _error: { state: true }, _width: { state: true }, _now: { state: true } };
+  static properties = { ...HomeViewCard.properties, _events: { state: true }, _error: { state: true }, _width: { state: true }, _height: { state: true }, _now: { state: true } };
   private _events?: CalendarEvent[];
   private _error = "";
   private _width = 0;
+  private _height = 0;
   private _now = new Date();
   private fetchedAt = 0;
   private fetchedFor = "";
@@ -49,7 +59,20 @@ export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
 
   static editorFields: EditorField[] = [
     { name: "entities", label: "Calendars", required: true, selector: { entity: { multiple: true, filter: { domain: "calendar" } } } },
-    { name: "title", helper: "Defaults to Up next", selector: { text: {} } },
+    {
+      name: "layout",
+      selector: {
+        select: {
+          mode: "dropdown",
+          options: [
+            { value: "strip", label: "Strip: the next events in a row" },
+            { value: "day", label: "Day: today, else what's next" },
+            { value: "list", label: "List: a full-page agenda" },
+          ],
+        },
+      },
+    },
+    { name: "title", helper: "Strip and day: defaults to Up next, or Today", selector: { text: {} } },
     { name: "days", label: "Days ahead", selector: { number: { min: 1, max: 60, mode: "box" } } },
     { name: "count", label: "Most events shown", selector: { number: { min: 1, max: 6, mode: "box" } } },
   ];
@@ -61,25 +84,52 @@ export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
   protected validate(config: CalendarConfig): void {
     if (!Array.isArray(config.entities) || !config.entities.length) throw new Error("Add one or more calendar entities");
     for (const e of calendarEntries(config)) if (!e.entity || domainOf(e.entity) !== "calendar") throw new Error(`Not a calendar: ${e.entity}`);
+    if (config.layout && !LAYOUTS.includes(config.layout)) throw new Error(`Unknown layout: ${config.layout} (strip, day or list)`);
+  }
+
+  // not `layout`: Home Assistant sets that property on every card
+  private get kind(): "strip" | "day" | "list" {
+    return this._config?.layout ?? "strip";
   }
 
   getGridOptions(): GridOptions {
+    if (this.kind === "day") return { columns: 12, rows: 4, min_columns: 6, min_rows: 3 };
+    if (this.kind === "list") return { columns: "full", rows: 8, min_columns: 6, min_rows: 4 };
     return { columns: "full", rows: 2, min_columns: 6, min_rows: 1 };
   }
 
-  /** a strip, never square */
+  /** a strip, panel or page, never square */
   protected get square(): boolean {
     return false;
   }
 
-  /** type is sized from the strip's height; the width decides how many events fit */
+  /** the agenda sits on the wallpaper */
+  protected get bare(): boolean {
+    return this.kind === "list";
+  }
+
+  /** type is sized from the height (the agenda's 2:1 page from its short side); the size decides how many events fit */
   protected refFrom(w: number, h: number): number {
     this._width = w;
+    this._height = h;
+    if (this.kind === "day") return Math.min(h, w * 0.5);
+    if (this.kind === "list") return Math.min(w / 2, h);
     return Math.min(w, h * 2);
   }
 
+  /** how many events the card has room for */
+  private room(): number {
+    const w = this._width;
+    const h = this._height;
+    if (!w || !h) return 1;
+    if (this.kind === "strip") return Math.max(1, Math.floor((w * 0.82) / EVENT_MIN_PX));
+    const ref = this.refFrom(w, h);
+    if (this.kind === "day") return Math.max(1, Math.floor((h - ref * (2 * DAY.pad + DAY.head + DAY.gap) + 1) / (ref * DAY.row)));
+    return Math.max(1, Math.floor((h - ref * 2 * LIST.edge + 1) / (ref * LIST.row)));
+  }
+
   protected cardClass(): string {
-    return "calendar";
+    return `calendar ${this.kind}`;
   }
 
   connectedCallback(): void {
@@ -157,25 +207,93 @@ export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
     const c = this._config!;
     if (!this.hass) return nothing;
     const colors = Object.fromEntries(calendarEntries(c).map((e) => [e.entity, e.color]));
+    const color = (e: CalendarEvent): string => colors[e.calendar ?? ""] ?? "#fff";
     const lang = this.hass.language;
+    const n = Math.min(c.count ?? (this.kind === "strip" ? 3 : Infinity), this.room());
+    const note = (text: string): TemplateResult => html`<div class="note ink">${text}</div>`;
+    const waiting = !this._events ? note(this._error ? "Calendar unavailable" : "Loading\u2026") : undefined;
+    if (this.kind === "day") return this.renderDay(n, color, waiting);
+    if (this.kind === "list") return this.renderList(n, color, waiting);
     const head = html`<div class="head ink">${ICONS.calendar}<span>${c.title ?? "Up next"}</span></div>`;
-    const room = this._width ? Math.max(1, Math.floor((this._width * 0.82) / EVENT_MIN_PX)) : 1;
-    const events = this._events ? upcoming(this._events, this._now, Math.min(c.count ?? 3, room)) : [];
+    const events = this._events ? upcoming(this._events, this._now, n) : [];
     let body: TemplateResult;
-    if (!this._events) body = html`<div class="note ink">${this._error ? "Calendar unavailable" : "Loading\u2026"}</div>`;
-    else if (!events.length) body = html`<div class="note ink">Nothing coming up</div>`;
+    if (waiting) body = waiting;
+    else if (!events.length) body = note("Nothing coming up");
     else
       body = html`${events.map((e) => {
         const b = dayBadge(e, this._now, lang);
         return html`<div class="event ${b.today ? "today" : ""}">
           <div class="badge"><span class="wd">${b.label}</span><span class="day">${b.day}</span></div>
           <div class="text ink">
-            <div class="summary">${e.summary}</div>
-            <div class="when"><i style="background:${colors[e.calendar ?? ""] ?? "#fff"}"></i>${eventTime(e, lang)}</div>
+            <div class="summary">${eventTitle(e)}</div>
+            <div class="when"><i style="background:${color(e)}"></i>${eventTime(e, lang)}</div>
           </div>
         </div>`;
       })}`;
     return html`<div class="strip" title=${this._error || nothing}>${head}${body}</div>`;
+  }
+
+  /** today's events, or what's next once today is done: a glass panel sized for a quadrant */
+  private renderDay(n: number, color: (e: CalendarEvent) => string, waiting?: TemplateResult): TemplateResult {
+    const c = this._config!;
+    const lang = this.hass!.language;
+    const agenda = this._events ? dayAgenda(this._events, this._now, n) : { today: 0, events: [] };
+    const shown = agenda.events;
+    const more = agenda.today - Math.min(agenda.today, shown.length);
+    const aside = waiting ? "" : !agenda.today ? (shown.length ? "Nothing else today" : "") : more > 0 ? `+${more} more today` : "";
+    // today's events read their time; later ones say which day too
+    const when = (e: CalendarEvent): string => {
+      const d = daysUntil(e, this._now);
+      if (d === 0) return eventTime(e, lang);
+      const day = d === 1 ? capitalize(relativeDay(e, this._now, lang)) : dayBadge(e, this._now, lang).weekday;
+      return `${day} \u00b7 ${eventTime(e, lang)}`;
+    };
+    let body: TemplateResult;
+    if (waiting) body = waiting;
+    else if (!shown.length) body = html`<div class="note ink">Nothing coming up</div>`;
+    else
+      body = html`${shown.map(
+        (e) => html`<div class="row ${calendarTime(e.start) <= this._now ? "now" : ""}">
+          <i class="bar" style="background:${color(e)}"></i>
+          <div class="text ink">
+            <div class="summary">${eventTitle(e)}</div>
+            <div class="when">${when(e)}</div>
+          </div>
+        </div>`,
+      )}`;
+    return html`<div class="dayview" title=${this._error || nothing}>
+      <div class="dhead ink">
+        ${ICONS.calendar}<span class="dtitle">${c.title ?? (agenda.today || waiting ? "Today" : "Up next")}</span>
+        <span class="aside">${aside}</span>
+      </div>
+      <div class="rows">${body}</div>
+    </div>`;
+  }
+
+  /** a full-page agenda: date badge, rule, title and time, and how far off it is; one badge per day */
+  private renderList(n: number, color: (e: CalendarEvent) => string, waiting?: TemplateResult): TemplateResult {
+    const lang = this.hass!.language;
+    const events = this._events ? upcoming(this._events, this._now, n) : [];
+    let last = "";
+    const rows = events.map((e) => {
+      const b = dayBadge(e, this._now, lang);
+      const first = b.key !== last;
+      last = b.key;
+      return html`<div class="lrow">
+        <div class="lbadge ${first && b.today ? "hv-frost today" : ""}">
+          ${first ? html`<small>${b.weekday}</small><b>${b.day}</b><small class="mon">${b.month}</small>` : nothing}
+        </div>
+        <i class="rule"></i>
+        <div class="text">
+          <div class="ltitle">${eventTitle(e)}</div>
+          <div class="lwhen"><i style="background:${color(e)}"></i>${eventTime(e, lang)}</div>
+        </div>
+        <div class="rel">${first ? relativeDay(e, this._now, lang) : ""}</div>
+      </div>`;
+    });
+    return html`<div class="agenda ink" title=${this._error || nothing}>
+      ${waiting ?? (rows.length ? rows : html`<div class="note">Nothing coming up</div>`)}
+    </div>`;
   }
 
   static styles = [
@@ -286,9 +404,167 @@ export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
         font-size: calc(var(--hv-ref) * 0.07);
         color: var(--hv-ink-2);
       }
+
+      /* day: a quadrant panel (pad 0.07, head 0.13, gap 0.03, rows 0.22 of --hv-ref; see DAY) */
+      .dayview {
+        height: 100%;
+        box-sizing: border-box;
+        padding: calc(var(--hv-ref) * 0.07) calc(var(--hv-ref) * 0.08);
+        display: flex;
+        flex-direction: column;
+        gap: calc(var(--hv-ref) * 0.03);
+      }
+      .dhead {
+        flex: none;
+        height: calc(var(--hv-ref) * 0.13);
+        display: flex;
+        align-items: center;
+        gap: calc(var(--hv-ref) * 0.035);
+        font-size: calc(var(--hv-ref) * 0.075);
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .dhead svg {
+        flex: none;
+        width: calc(var(--hv-ref) * 0.1);
+        height: calc(var(--hv-ref) * 0.1);
+        filter: drop-shadow(var(--hv-shadow-text));
+      }
+      .dtitle {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .aside {
+        margin-left: auto;
+        font-size: calc(var(--hv-ref) * 0.066);
+        font-weight: 400;
+        color: var(--hv-ink-2);
+      }
+      .rows {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .rows .note {
+        flex: 1;
+        display: grid;
+        place-items: center;
+        padding: 0 0 calc(var(--hv-ref) * 0.08);
+        font-size: calc(var(--hv-ref) * 0.08);
+      }
+      .row {
+        flex: none;
+        height: calc(var(--hv-ref) * 0.22);
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        gap: calc(var(--hv-ref) * 0.05);
+        padding: 0 calc(var(--hv-ref) * 0.03);
+        border-radius: calc(var(--hv-ref) * 0.05);
+      }
+      .row.now {
+        background: rgb(255 255 255 / 0.12);
+      }
+      .bar {
+        flex: none;
+        width: calc(var(--hv-ref) * 0.02);
+        min-width: 3px;
+        height: 70%;
+        border-radius: 2px;
+        box-shadow: 0 0 0 0.5px rgb(255 255 255 / 0.4);
+      }
+      .row .summary {
+        font-size: calc(var(--hv-ref) * 0.088);
+        line-height: 1.2;
+      }
+      .row .when {
+        margin-top: 0;
+        font-size: calc(var(--hv-ref) * 0.066);
+        line-height: 1.25;
+      }
+
+      /* list: a full-page agenda on the wallpaper (edge 0.045, rows 0.227 of --hv-ref; see LIST) */
+      .agenda {
+        height: 100%;
+        box-sizing: border-box;
+        padding: calc(var(--hv-ref) * 0.045) calc(var(--hv-ref) * 0.083);
+        /* a deeper shadow: the text sits on the light parts of the wallpaper too */
+        --hv-shadow-text: 0 1px 3px rgb(40 30 20 / 0.45), 0 0 16px rgb(40 30 20 / 0.28);
+      }
+      .agenda .note {
+        padding: calc(var(--hv-ref) * 0.04) 0;
+        font-size: calc(var(--hv-ref) * 0.054);
+      }
+      .lrow {
+        height: calc(var(--hv-ref) * 0.227);
+        display: grid;
+        grid-template-columns: calc(var(--hv-ref) * 0.158) auto minmax(0, 1fr) auto;
+        column-gap: calc(var(--hv-ref) * 0.0375);
+        align-items: center;
+      }
+      .lbadge {
+        height: calc(var(--hv-ref) * 0.19);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        line-height: 1.05;
+        --hv-radius: calc(var(--hv-ref) * 0.045);
+      }
+      .lbadge small {
+        font-size: calc(var(--hv-ref) * 0.031);
+        color: rgb(255 255 255 / 0.9);
+      }
+      .lbadge small.mon {
+        font-size: calc(var(--hv-ref) * 0.027);
+        letter-spacing: 0.06em;
+      }
+      .lbadge b {
+        font-size: calc(var(--hv-ref) * 0.079);
+        font-weight: 600;
+        font-family: ui-rounded, "SF Pro Rounded", var(--hv-font);
+      }
+      .rule {
+        width: 3px;
+        height: calc(var(--hv-ref) * 0.167);
+        border-radius: 2px;
+        background: rgb(255 255 255 / 0.7);
+        box-shadow: 0 0 4px rgb(40 30 20 / 0.2);
+      }
+      .ltitle {
+        font-size: calc(var(--hv-ref) * 0.054);
+        font-weight: 600;
+        line-height: 1.2;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .lwhen {
+        margin-top: calc(var(--hv-ref) * 0.008);
+        font-size: calc(var(--hv-ref) * 0.035);
+        color: rgb(255 255 255 / 0.9);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .lwhen i {
+        display: inline-block;
+        width: 0.55em;
+        height: 0.55em;
+        border-radius: 50%;
+        margin-right: 0.5em;
+        vertical-align: 0.05em;
+        box-shadow: 0 0 0 0.5px rgb(255 255 255 / 0.5);
+      }
+      .rel {
+        font-size: calc(var(--hv-ref) * 0.035);
+        font-weight: 500;
+        white-space: nowrap;
+      }
     `,
   ];
 }
 
 customElements.define("homeview-calendar-card", HomeViewCalendarCard);
-registerCard("homeview-calendar-card", "HomeView Up Next", "The next events from your calendars, on a liquid-glass strip.");
+registerCard("homeview-calendar-card", "HomeView Up Next", "The next events from your calendars: a liquid-glass strip, a day panel, or a full-page agenda.");
