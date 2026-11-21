@@ -3,18 +3,21 @@
  * soft shade. Tap opens the live stream full screen (Home Assistant's own player: HLS or WebRTC,
  * whatever the camera offers); swipe down, Escape or the back gesture closes it.
  * Snapshots pause while the card is hidden or the screen is off.
+ * With `entities:` it is a full-screen page of live cameras instead (camera-page.ts).
  */
 import { css, html, nothing, type PropertyValues, type TemplateResult } from "lit";
 import { HomeViewCard, glassStyles, type BaseConfig } from "./base.ts";
 import { domainOf, fireEvent, friendlyName, isUnavailable, registerCard, type GridOptions, type Hass, type HassEntity } from "../ha.ts";
 import type { EditorField } from "../editor.ts";
 import { ICONS } from "../icons.ts";
-import { snapshotUrl, within } from "../logic.ts";
+import { cameraPages, cropTop, snapshotUrl } from "../logic.ts";
 import { inDialog } from "../glass/backdrop.ts";
 import { HomeViewOverlay, openOverlay } from "./overlay.ts";
+import { cameraPlayer, type CameraPageConfig } from "./camera-page.ts";
 
-export interface CameraConfig extends BaseConfig {
-  entity: string;
+export interface CameraConfig extends BaseConfig, CameraPageConfig {
+  /** the tile's camera; `entities` makes the card a full-screen page of cameras instead */
+  entity?: string;
   name?: string;
   /** seconds between snapshots (default 10) */
   refresh?: number;
@@ -27,7 +30,9 @@ export interface CameraConfig extends BaseConfig {
 const STALE_AFTER = 2;
 
 export class HomeViewCameraCard extends HomeViewCard<CameraConfig> {
-  static properties = { ...HomeViewCard.properties, _src: { state: true }, _fails: { state: true } };
+  static properties = { ...HomeViewCard.properties, layout: { attribute: false }, _src: { state: true }, _fails: { state: true } };
+  /** set by Home Assistant: "panel" when the card is a panel view's only card */
+  layout?: string;
   /** the snapshot on screen; the next one loads off screen and replaces it when decoded */
   private _src = "";
   private loading = "";
@@ -37,7 +42,14 @@ export class HomeViewCameraCard extends HomeViewCard<CameraConfig> {
   private live?: HomeViewCameraLive;
 
   static editorFields: EditorField[] = [
-    { name: "entity", required: true, selector: { entity: { filter: { domain: "camera" } } } },
+    { name: "entity", label: "Camera (tile)", selector: { entity: { filter: { domain: "camera" } } } },
+    {
+      name: "entities",
+      label: "Cameras (full-screen page)",
+      helper: "Set these instead of one camera for a page of live cameras that fills a panel view: swipe between them. A name per camera can be set in YAML.",
+      selector: { entity: { multiple: true, filter: { domain: "camera" } } },
+    },
+    { name: "home_path", label: "Home button goes to", helper: "Page only. Defaults to the dashboard's first view, e.g. /echo-show/home", selector: { text: {} } },
     { name: "name", selector: { text: {} } },
     { name: "refresh", label: "Seconds between snapshots", selector: { number: { min: 2, max: 600, mode: "box", unit_of_measurement: "s" } } },
     { name: "fit", selector: { select: { mode: "dropdown", options: [{ value: "cover", label: "Fill" }, { value: "contain", label: "Fit whole picture" }] } } },
@@ -54,10 +66,23 @@ export class HomeViewCameraCard extends HomeViewCard<CameraConfig> {
   }
 
   protected validate(config: CameraConfig): void {
-    if (!config.entity || domainOf(config.entity) !== "camera") throw new Error("Pick a camera entity");
+    // an empty list (the visual editor's, once cleared) leaves the tile as it was
+    if (Array.isArray(config.entities) && config.entities.length) {
+      if (!cameraPages(config.entities).length) throw new Error("Add one or more camera entities");
+    } else if (!config.entity || domainOf(config.entity) !== "camera") throw new Error("Pick a camera entity");
+  }
+
+  /** a full-screen page of live cameras (`entities:`) rather than a snapshot tile */
+  private get page(): boolean {
+    return Array.isArray(this._config?.entities) && this._config.entities.length > 0;
+  }
+
+  protected get square(): boolean {
+    return !this.page && super.square;
   }
 
   getGridOptions(): GridOptions {
+    if (this.page) return { columns: "full", rows: "auto", min_columns: 6, min_rows: 4 };
     return { columns: 6, rows: "auto", min_columns: 3, min_rows: 2 };
   }
 
@@ -97,7 +122,7 @@ export class HomeViewCameraCard extends HomeViewCard<CameraConfig> {
   private snap = (): void => {
     this.timer = 0;
     const c = this._config;
-    if (!c || !this.hass || !this.onScreen || document.visibilityState === "hidden") return;
+    if (!c?.entity || this.page || !this.hass || !this.onScreen || document.visibilityState === "hidden") return;
     const every = Math.max(2, c.refresh ?? 10);
     this.timer = window.setTimeout(this.snap, every * 1000);
     const s = this.hass.states[c.entity];
@@ -123,8 +148,9 @@ export class HomeViewCameraCard extends HomeViewCard<CameraConfig> {
     img.src = url;
   };
 
+  // the tile's own code: it only runs with `entity` set (no `entities`)
   private tap = (): void => {
-    const c = this._config!;
+    const c = this._config as CameraConfig & { entity: string };
     const action = c.tap_action ?? "live";
     if (action === "none" || !this.hass) return;
     const s = this.hass.states[c.entity];
@@ -147,7 +173,7 @@ export class HomeViewCameraCard extends HomeViewCard<CameraConfig> {
   };
 
   private name(): string {
-    const c = this._config!;
+    const c = this._config as CameraConfig & { entity: string };
     return c.name ?? (this.hass ? friendlyName(this.hass, c.entity) : c.entity);
   }
 
@@ -160,11 +186,18 @@ export class HomeViewCameraCard extends HomeViewCard<CameraConfig> {
   protected render(): TemplateResult {
     const c = this._config;
     if (!c || !this.hass) return html``;
+    if (this.page) {
+      // a panel view, or a cell with a fixed number of rows, gives the page its height; anywhere else (a Sections
+      // cell with rows auto, a masonry column) nothing does, so it takes the Echo Show's 2:1 shape instead of 0 px
+      const fill = this.layout === "panel" || typeof c.grid_options?.rows === "number";
+      return html`<homeview-camera-page .hass=${this.hass} .config=${c} ?wide=${!fill}></homeview-camera-page>`;
+    }
+    if (!c.entity) return html``;
     const s = this.hass.states[c.entity];
     const off = !s || isUnavailable(s);
     const name = this.name();
     const fit = c.fit ?? "cover";
-    const crop = fit === "cover" ? Math.min(20, Math.max(0, Number(c.crop_top) || 0)) : 0;
+    const crop = fit === "cover" ? cropTop(c.crop_top) : 0;
     const src = this._fails >= STALE_AFTER ? "" : this._src;
     const hint = !s ? "Camera not found" : off ? "Offline" : this._fails >= STALE_AFTER ? "Not responding" : "Loading\u2026";
     return html`<ha-card
@@ -260,25 +293,6 @@ export class HomeViewCameraCard extends HomeViewCard<CameraConfig> {
       }
     `,
   ];
-}
-
-type CardHelpers = { createCardElement(config: Record<string, unknown>): HTMLElement };
-
-/**
- * Home Assistant's camera player (`ha-camera-stream`) is loaded with its picture cards. Load it
- * through the card helpers if no card on this dashboard has yet; false when it cannot be had.
- */
-async function cameraPlayer(entity: string): Promise<boolean> {
-  if (customElements.get("ha-camera-stream")) return true;
-  try {
-    const load = (window as unknown as { loadCardHelpers?: () => Promise<CardHelpers> }).loadCardHelpers;
-    if (!load) return false; // not inside Home Assistant's frontend
-    (await load()).createCardElement({ type: "picture-entity", entity, camera_view: "live" });
-    await within(customElements.whenDefined("ha-camera-stream"), 5000);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /** The live view: the camera full screen, closed by a swipe down, Escape or the back gesture. */

@@ -438,6 +438,30 @@ export function snapshotUrl(entityPicture: string, now: number, seconds: number)
   return `${entityPicture}${entityPicture.includes("?") ? "&" : "?"}hv=${Math.floor(now / (seconds * 1000))}`;
 }
 
+/** percent hidden at the top of a camera picture, clamped to 0-20 */
+export const cropTop = (v: unknown): number => Math.min(20, Math.max(0, Number(v) || 0));
+
+export interface CameraPage {
+  entity: string;
+  name?: string;
+}
+
+/** the camera page's cameras, from ids or { entity, name } */
+export function cameraPages(entities: unknown): CameraPage[] {
+  if (!Array.isArray(entities)) return [];
+  return entities.flatMap((e) => {
+    const c = (typeof e === "string" ? { entity: e } : e) as { entity?: unknown; name?: unknown } | null;
+    if (!c || typeof c.entity !== "string" || !c.entity.startsWith("camera.")) return [];
+    return [{ entity: c.entity, name: typeof c.name === "string" ? c.name : undefined }];
+  });
+}
+
+/** index i on a ring of n: the camera page wraps from the last camera to the first */
+export const wrap = (i: number, n: number): number => (n ? ((i % n) + n) % n : 0);
+
+/** columns of the camera page's picker: two for up to four cameras, three past that (three in a row for three) */
+export const pickerColumns = (n: number): number => (n <= 2 ? Math.max(1, n) : n === 4 ? 2 : 3);
+
 // ---- vacuum ----
 
 export const VACUUM_RUNNING = ["cleaning", "paused", "returning"];

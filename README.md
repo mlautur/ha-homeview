@@ -11,7 +11,7 @@ A card pack that brings an Apple HomeView-style wall panel to Home Assistant. Re
 | Voice | `custom:homeview-voice-card` | Talk to Assist with an audio-reactive visualizer, or mirror an `assist_satellite` device. |
 | Weather | `custom:homeview-weather-card` | Time and date, a big temperature, the condition, and today's high, low and chance of rain. |
 | Up next | `custom:homeview-calendar-card` | A strip with the next events from one or more calendars. |
-| Camera | `custom:homeview-camera-card` | Snapshot tile, refreshed every few seconds. Tap for the live stream full screen. |
+| Camera | `custom:homeview-camera-card` | Snapshot tile, refreshed every few seconds. Tap for the live stream full screen. With `entities`, a full-screen page of live cameras to swipe through. |
 | Vacuum | `custom:homeview-vacuum-card` | Robot vacuum tile. Tap for a panel with the map, rooms, start / pause / dock / locate, suction and mop modes. |
 
 Every card works like a built-in card in the **Sections** view:
@@ -184,6 +184,29 @@ tap_action: live          # live (default) | more-info | none
 
 Tap for the live stream over the whole dashboard, played by Home Assistant's own camera player (HLS or WebRTC, whatever the camera offers). To close it, swipe down, press Escape or use the back gesture. It also closes by itself after 10 minutes. Snapshots pause while the card is hidden or the screen is off. A camera that is unavailable shows *Offline*; one whose snapshots keep failing shows *Not responding* instead of a frozen frame.
 
+Give it `entities` instead of `entity` and it becomes a page of live cameras, made for a panel view (for example a wall tablet or an Echo Show):
+
+```yaml
+type: custom:homeview-camera-card
+entities:
+  - entity: camera.front_door
+    name: Front Door      # optional
+  - camera.backyard
+home_path: /wall/home     # where the home button goes (the dashboard's first view)
+crop_top: 0               # as on the tile, for every camera on the page and in the grid
+```
+
+In a panel view, or a Sections cell with a set number of rows, the page fills its space; anywhere else it takes a 2:1 shape (the Echo Show's).
+
+One camera fills the card edge to edge, live (Home Assistant's own player). Swipe left or right, or use the arrow keys, for the next or previous camera; it wraps around. Over the picture:
+- the camera's name, top left;
+- a home button, top right, that goes to `home_path`;
+- the grid button, bottom left: every camera at once, tap one to show it;
+- one dot per camera, bottom centre;
+- the speaker button, bottom right. The page starts muted and mutes again on another camera or when it is hidden.
+
+Only the camera on screen streams, and only while the page is visible: on another view, a hidden tab or a screen that is off, nothing streams. Swipes here change the camera, not the view, with [Swipe Navigation](#swipe-navigation) too; use the home button to leave.
+
 ```yaml
 type: custom:homeview-vacuum-card
 entity: vacuum.robot
@@ -205,7 +228,7 @@ Tap outside the panel, swipe down or press Escape to close it. Hold the tile for
 
 ### Swipe Navigation
 
-[Swipe Navigation](https://github.com/zanna-37/hass-swipe-navigation) swipes between dashboard views, for example from the panel to a view of cameras. It works with HomeView. Swipes on the photo frame still change the picture and do not change the view.
+[Swipe Navigation](https://github.com/zanna-37/hass-swipe-navigation) swipes between dashboard views, for example from the panel to a view of cameras. It works with HomeView. Swipes on the photo frame still change the picture, and swipes on a camera page change the camera; neither changes the view.
 
 ### Voice needs HTTPS for the microphone
 
