@@ -32,16 +32,16 @@ views:
           - type: custom:homeview-calendar-card
             layout: day
             entities:
-              - calendar.mlautur1_gmail_com
-              - calendar.marcelin_lauture_saks_com
-              - calendar.holidays_in_united_states
-              - calendar.birthdays_2
+              - calendar.personal
+              - calendar.work
+              - calendar.holidays
+              - calendar.birthdays
             grid_options: { columns: 12, rows: 8 }
           # bottom left: Mavis, mirroring the Echo's own voice satellite
           - type: custom:homeview-voice-card
             name: Mavis
             speak: true
-            satellite: assist_satellite.vaca_amzn_echo_show_5_2bc2
+            satellite: assist_satellite.kitchen_display
             grid_options: { columns: 12, rows: 4 }
 
   - title: Controls
@@ -59,30 +59,30 @@ views:
             grid_options: { columns: 12, rows: 4 }
           # top right: what the Echo plays (tap for the Music page) and the front door
           - type: custom:homeview-tile-card
-            entity: media_player.echo_show
+            entity: media_player.kitchen_display
             name: Echo Show
             tap_action: navigate
             navigation_path: /echo-show/music
             grid_options: { columns: 6, rows: 4 }
           - type: custom:homeview-tile-card
-            entity: lock.front_door_level_bolt_lock_mechanism
+            entity: lock.front_door
             name: Front Door
             subtitle: Lock
             confirm_unlock: true
             grid_options: { columns: 6, rows: 4 }
           # bottom left: the weather, without the time (the clock is above it)
           - type: custom:homeview-weather-card
-            entity: weather.temple
+            entity: weather.home
             show_time: false
             grid_options: { columns: 12, rows: 4 }
           # bottom right: the vacuum and all four Family Room curtains in one tile
           - type: custom:homeview-vacuum-card
-            entity: vacuum.s7_max_ultra
+            entity: vacuum.robot
             name: Vacuum
             modes:
-              - select.family_room_s7_max_ultra_cleaning_mode
-              - select.s7_max_ultra_mop_mode
-              - select.s7_max_ultra_mop_intensity
+              - select.robot_cleaning_mode
+              - select.robot_mop_mode
+              - select.robot_mop_intensity
             grid_options: { columns: 6, rows: 4 }
           - type: custom:homeview-tile-card
             entity: cover.family_room_curtains
@@ -97,7 +97,7 @@ views:
     cards:
       # Now Playing on the Echo's own speaker
       - type: custom:homeview-media-card
-        entity: media_player.echo_show
+        entity: media_player.kitchen_display
 
   - title: Cameras
     path: cameras
@@ -107,17 +107,17 @@ views:
       # one live camera edge to edge; swipe for the next
       - type: custom:homeview-camera-card
         entities:
-          - entity: camera.g6_pro_bullet_high_resolution_channel
+          - entity: camera.front_door
             name: Front Door
             crop_top: 7
-          - entity: camera.g6_dome_high_resolution_channel
+          - entity: camera.backyard_dome
             name: Backyard Dome
             crop_top: 7
-          - entity: camera.g6_bullet_high_resolution_channel
-            name: Backyard Bullet
+          - entity: camera.backyard
+            name: Backyard
             crop_top: 7
-          - entity: camera.g4_instant_high_resolution_channel
-            name: Kids Room
+          - entity: camera.garage
+            name: Garage
             crop_top: 7
 
   - title: Weather
@@ -126,7 +126,7 @@ views:
     type: panel
     cards:
       - type: custom:homeview-weather-card
-        entity: weather.temple
+        entity: weather.home
         forecast_days: 4
 
   - title: Calendar
@@ -138,7 +138,7 @@ views:
         layout: list
         days: 14
         entities:
-          - calendar.mlautur1_gmail_com
-          - calendar.marcelin_lauture_saks_com
-          - calendar.holidays_in_united_states
-          - calendar.birthdays_2
+          - calendar.personal
+          - calendar.work
+          - calendar.holidays
+          - calendar.birthdays
