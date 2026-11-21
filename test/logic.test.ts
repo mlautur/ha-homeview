@@ -289,12 +289,12 @@ test("camera: snapshot URL changes once per interval", () => {
   assert.equal(snapshotUrl("/a", 9999, 10), "/a?hv=0");
 });
 
-test("camera page: cameras from ids or objects, crop clamped, the card's crop as default", () => {
-  assert.deepEqual(cameraPages(["camera.a", { entity: "camera.b", name: "B", crop_top: 50 }, { entity: "light.x" }, null, 3], 7), [
-    { entity: "camera.a", name: undefined, crop: 7 },
-    { entity: "camera.b", name: "B", crop: 20 },
+test("camera page: cameras from ids or objects, crop clamped", () => {
+  assert.deepEqual(cameraPages(["camera.a", { entity: "camera.b", name: "B" }, { entity: "light.x" }, null, 3]), [
+    { entity: "camera.a", name: undefined },
+    { entity: "camera.b", name: "B" },
   ]);
-  assert.deepEqual(cameraPages([{ entity: "camera.c", crop_top: 0 }], 7), [{ entity: "camera.c", name: undefined, crop: 0 }]);
+  assert.equal(cropTop(50), 20);
   assert.deepEqual(cameraPages(undefined), []);
   assert.equal(cropTop(-3), 0);
   assert.equal(cropTop("x"), 0);

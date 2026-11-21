@@ -444,17 +444,15 @@ export const cropTop = (v: unknown): number => Math.min(20, Math.max(0, Number(v
 export interface CameraPage {
   entity: string;
   name?: string;
-  /** percent hidden at the top, 0-20 */
-  crop: number;
 }
 
-/** the camera page's cameras, from ids or { entity, name, crop_top }; a camera without crop_top takes the card's */
-export function cameraPages(entities: unknown, cropDefault?: unknown): CameraPage[] {
+/** the camera page's cameras, from ids or { entity, name } */
+export function cameraPages(entities: unknown): CameraPage[] {
   if (!Array.isArray(entities)) return [];
   return entities.flatMap((e) => {
-    const c = (typeof e === "string" ? { entity: e } : e) as { entity?: unknown; name?: unknown; crop_top?: unknown } | null;
+    const c = (typeof e === "string" ? { entity: e } : e) as { entity?: unknown; name?: unknown } | null;
     if (!c || typeof c.entity !== "string" || !c.entity.startsWith("camera.")) return [];
-    return [{ entity: c.entity, name: typeof c.name === "string" ? c.name : undefined, crop: cropTop(c.crop_top ?? cropDefault) }];
+    return [{ entity: c.entity, name: typeof c.name === "string" ? c.name : undefined }];
   });
 }
 

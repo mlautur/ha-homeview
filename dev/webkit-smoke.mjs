@@ -691,7 +691,7 @@ result.cards = await cardsPage.evaluate(async () => {
   moved.appendChild(movedCal);
   const vacuum = await make("homeview-vacuum-card", { entity: "vacuum.robot", modes: ["select.robot_mop"], grid_options: { rows: 3 } }, 234, 184);
   const media = await make("homeview-tile-card", { entity: "media_player.room", grid_options: { rows: 3 } }, 234, 184);
-  const camPage = await make("homeview-camera-card", { entities: [{ entity: "camera.door", name: "Front", crop_top: 7 }, "camera.gone", { entity: "camera.door", name: "Back" }], home_path: "/echo-show/home" }, 960, 480);
+  const camPage = await make("homeview-camera-card", { entities: [{ entity: "camera.door", name: "Front" }, "camera.gone", { entity: "camera.door", name: "Back" }], crop_top: 7, home_path: "/echo-show/home" }, 960, 480);
   // the page anywhere but a panel view or a fixed-rows cell (a Sections cell with rows auto): an auto-height cell
   const autoCell = document.body.appendChild(document.createElement("div"));
   autoCell.style.cssText = "width:600px;margin:8px";
@@ -750,6 +750,7 @@ result.cards = await cardsPage.evaluate(async () => {
   pq(".grid-btn").click();
   await wait(50);
   out.camPage.tiles = [...pg.shadowRoot.querySelectorAll(".tile")].map((t) => t.textContent.trim());
+  out.camPage.tileTops = [...pg.shadowRoot.querySelectorAll(".tile img")].map((i) => i.style.top);
   pg.shadowRoot.querySelectorAll(".tile")[0].click();
   await wait(100);
   out.camPage.picked = pageNow();
@@ -934,6 +935,7 @@ if (cp.left.name !== "Gone" || cp.left.live.length || !/Offline/.test(cp.offline
 if (cp.vertical.name !== "Gone") fail.push(`camera page: a vertical drag changed the camera to ${cp.vertical.name}`);
 if (cp.wrapped.name !== "Back" || !doorLive(cp.wrapped)) fail.push(`camera page: two swipes right from the second camera show ${JSON.stringify(cp.wrapped)}, expected to wrap to the last (Back) with its stream`);
 if (cp.unmuted.mute !== "Mute") fail.push("camera page: the speaker button did not unmute");
+if (!cp.tileTops.length || cp.tileTops.some((t) => t !== "-7%")) fail.push(`camera page: picker tiles' tops are ${cp.tileTops.join(", ")}, expected the card's crop_top 7 (-7%) on each`);
 if (cp.tiles.join() !== "Front,Gone,Back") fail.push(`camera page: picker shows ${cp.tiles.join(", ")}, expected Front, Gone, Back`);
 if (cp.picked.name !== "Front" || !cp.pickerClosed || cp.picked.mute !== "Unmute") fail.push(`camera page: picking Front shows ${JSON.stringify(cp.picked)} (picker closed: ${cp.pickerClosed}), expected Front, muted again, picker closed`);
 if (cp.path !== "/echo-show/home") fail.push(`camera page: the home button went to ${cp.path}, expected /echo-show/home`);

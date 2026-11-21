@@ -46,7 +46,7 @@ export class HomeViewCameraCard extends HomeViewCard<CameraConfig> {
     {
       name: "entities",
       label: "Cameras (full-screen page)",
-      helper: "Set these instead of one camera for a page of live cameras that fills a panel view: swipe between them. Name and crop_top per camera can be set in YAML.",
+      helper: "Set these instead of one camera for a page of live cameras that fills a panel view: swipe between them. A name per camera can be set in YAML.",
       selector: { entity: { multiple: true, filter: { domain: "camera" } } },
     },
     { name: "home_path", label: "Home button goes to", helper: "Page only. Defaults to the dashboard's first view, e.g. /echo-show/home", selector: { text: {} } },

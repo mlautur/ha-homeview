@@ -8,7 +8,7 @@ import { LitElement, css, html, nothing, type PropertyValues, type TemplateResul
 import { keyed } from "lit/directives/keyed.js";
 import { friendlyName, isUnavailable, type Hass } from "../ha.ts";
 import { ICONS } from "../icons.ts";
-import { cameraPages, pickerColumns, within, wrap, type CameraPage } from "../logic.ts";
+import { cameraPages, cropTop, pickerColumns, within, wrap, type CameraPage } from "../logic.ts";
 import { trackGestures } from "../util/gesture.ts";
 import { SLIDE_MS } from "./photo-stage.ts";
 
@@ -86,7 +86,12 @@ export class HomeViewCameraPage extends LitElement {
   private watchers?: { io: IntersectionObserver; ro: ResizeObserver };
 
   private get cams(): CameraPage[] {
-    return cameraPages(this.config?.entities, this.config?.crop_top);
+    return cameraPages(this.config?.entities);
+  }
+
+  /** percent hidden at the top of every camera, 0-20 */
+  private get crop(): number {
+    return cropTop(this.config?.crop_top);
   }
 
   connectedCallback(): void {
@@ -248,7 +253,7 @@ export class HomeViewCameraPage extends LitElement {
     const s = this.hass?.states[c.entity];
     if (!s || isUnavailable(s) || !this.hass || !this._seen || this._player === undefined || !this._box.h) return nothing;
     // the player sizes its video from the aspect ratio: the frame's, which is taller than the page by the crop
-    const ratio = this._box.w / (this._box.h * (1 + c.crop / 100));
+    const ratio = this._box.w / (this._box.h * (1 + this.crop / 100));
     const player = customElements.get("ha-camera-stream") && this._player;
     return keyed(
       `${c.entity}:${this._muted}`,
@@ -268,7 +273,7 @@ export class HomeViewCameraPage extends LitElement {
     const hint = !s ? "Camera not found" : isUnavailable(s) ? "Offline" : "";
     const x = `calc(${off - this._slide} * (100% + ${GAP}px) + ${this._drag}px)`;
     return html`<div class="cam" style="transform:translateX(${x})" aria-hidden=${off ? "true" : "false"}>
-      <div class="frame" style="top:${-c.crop}%;height:${100 + c.crop}%">
+      <div class="frame" style="top:${-this.crop}%;height:${100 + this.crop}%">
         ${snap ? html`<img class="snap" src=${snap} alt="" draggable="false" />` : nothing} ${off ? nothing : this.stream(c)}
       </div>
       ${hint ? html`<div class="empty">${ICONS.camera}<span>${hint}</span></div>` : nothing}
@@ -288,7 +293,7 @@ export class HomeViewCameraPage extends LitElement {
           const snap = this.snapshot(c);
           const name = this.nameOf(c);
           return html`<button class="tile ${i === this._cur ? "cur" : ""}" aria-label=${name} aria-current=${i === this._cur ? "true" : "false"} @click=${() => this.pick(i)}>
-            ${snap ? html`<img src=${snap} alt="" draggable="false" style="top:${-c.crop}%;height:${100 + c.crop}%" />` : html`<span class="tile-icon">${ICONS.camera}</span>`}
+            ${snap ? html`<img src=${snap} alt="" draggable="false" style="top:${-this.crop}%;height:${100 + this.crop}%" />` : html`<span class="tile-icon">${ICONS.camera}</span>`}
             <span class="tile-name">${name}</span>
           </button>`;
         })}

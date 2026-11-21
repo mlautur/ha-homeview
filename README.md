@@ -191,7 +191,6 @@ type: custom:homeview-camera-card
 entities:
   - entity: camera.front_door
     name: Front Door      # optional
-    crop_top: 7           # optional, 0-20; defaults to the card's crop_top
   - camera.backyard
 home_path: /wall/home     # where the home button goes (the dashboard's first view)
 ```
