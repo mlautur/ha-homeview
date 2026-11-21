@@ -772,7 +772,9 @@ result.cards = await cardsPage.evaluate(async () => {
     const q = (s) => np.shadowRoot.querySelector(s);
     const btn = (label) => [...np.shadowRoot.querySelectorAll("button")].find((b) => b.getAttribute("aria-label").startsWith(label));
     const elapsed = () => q(".times span").textContent;
-    out.np = { text: text(np), at: elapsed(), art: q(".art img")?.getAttribute("src") ?? "", backdrop: !!q(".bg img"), close: !!btn("Close") };
+    // where the bar should be: 0:23 when the state was made, plus the time the cards before it took
+    const since = (Date.now() - Date.parse(hass.states["media_player.echo"].attributes.media_position_updated_at)) / 1000;
+    out.np = { expect: Math.floor(23 + since), text: text(np), at: elapsed(), art: q(".art img")?.getAttribute("src") ?? "", backdrop: !!q(".bg img"), close: !!btn("Close") };
     out.np.sizes = [...np.shadowRoot.querySelectorAll("button")].map((b) => Math.min(b.offsetWidth, b.offsetHeight));
     await wait(1500);
     out.np.later = elapsed();
@@ -1000,7 +1002,9 @@ if (cp.picked.name !== "Front" || !cp.pickerClosed || cp.picked.mute !== "Unmute
 if (cp.path !== "/echo-show/home") fail.push(`camera page: the home button went to ${cp.path}, expected /echo-show/home`);
 const np = c.np;
 if (!/Golden Hour/.test(np.text) || !/Artist/.test(np.text) || !/Album/.test(np.text) || !/3:29/.test(np.text)) fail.push(`now playing: shows "${np.text}", expected the title, artist, album and length`);
-if (!/^0:2[34]$/.test(np.at) || np.later === np.at) fail.push(`now playing: progress read ${np.at} then ${np.later} 1.5 s later, expected it to run on from 0:23`);
+const secs = (t) => t.split(":").reduce((a, b) => a * 60 + Number(b), 0);
+if (Math.abs(secs(np.at) - np.expect) > 1 || secs(np.later) <= secs(np.at))
+  fail.push(`now playing: progress read ${np.at} then ${np.later} 1.5 s later, expected about ${np.expect} s (0:23 plus the time since) and running on`);
 if (!np.art || !np.backdrop || !np.close) fail.push(`now playing: art ${np.art}, blurred backdrop ${np.backdrop}, close button ${np.close}`);
 if (np.sizes.some((s) => s < 44)) fail.push(`now playing: buttons smaller than 44px (${np.sizes.join(", ")})`);
 if (!np.volumeOpen || !np.volumeClosed) fail.push(`now playing: volume slider open ${np.volumeOpen}, closed by a tap elsewhere ${np.volumeClosed}`);

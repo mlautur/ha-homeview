@@ -274,7 +274,7 @@ export class HomeViewMediaCard extends HomeViewCard<MediaConfig> {
           <div class="row sec">
             ${f & MEDIA.VOLUME_SET
               ? html`<div class="volwrap">
-                  ${btn(`Volume ${Math.round(vol * 100)}%`, muted ? ICONS.volumeOff : ICONS.volume, this.toggleVolume, { pressed: this._vol })}
+                  ${btn(`Volume ${Math.round(vol * 100)}%`, muted ? ICONS.muted : ICONS.sound, this.toggleVolume, { pressed: this._vol })}
                   ${this._vol
                     ? html`<div class="pop" role="group" aria-label="Volume">
                         <input
