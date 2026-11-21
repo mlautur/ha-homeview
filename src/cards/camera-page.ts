@@ -76,7 +76,7 @@ export class HomeViewCameraPage extends LitElement {
   /** undefined while loading Home Assistant's player; false falls back to the MJPEG stream */
   private _player?: boolean;
   private _box = { w: 0, h: 0 };
-  /** when the snapshots of the cameras beside this one were taken (one frame per camera change) */
+  /** when the snapshots of the cameras beside this one were taken (refreshed when the page comes into view and when the picker opens) */
   private stamp = Date.now();
   private slideTimer = 0;
   private asked = false;
@@ -207,7 +207,6 @@ export class HomeViewCameraPage extends LitElement {
     this._drag = 0;
     this._still = true;
     this._muted = true;
-    this.stamp = Date.now();
   }
 
   private togglePicker = (): void => {

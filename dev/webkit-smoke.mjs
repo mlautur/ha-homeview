@@ -742,8 +742,11 @@ result.cards = await cardsPage.evaluate(async () => {
   await drag(0, 200);
   out.camPage.vertical = pageNow();
   await drag(300, 0);
+  const slotSnap = (i) => pg.shadowRoot.querySelectorAll(".cam")[i]?.querySelector(".snap")?.getAttribute("src");
+  const slidIn = slotSnap(0);
   await drag(300, 0);
   out.camPage.wrapped = pageNow();
+  out.camPage.landedSnap = [slidIn, slotSnap(1)];
   pq(".mute").click();
   await wait(50);
   out.camPage.unmuted = pageNow();
@@ -934,6 +937,7 @@ if (cp.frameTop !== "-7%") fail.push(`camera page: crop_top 7 gives frame top ${
 if (cp.left.name !== "Gone" || cp.left.live.length || !/Offline/.test(cp.offlineHint ?? "")) fail.push(`camera page: a swipe left shows ${JSON.stringify(cp.left)} / "${cp.offlineHint}", expected the offline camera, no stream`);
 if (cp.vertical.name !== "Gone") fail.push(`camera page: a vertical drag changed the camera to ${cp.vertical.name}`);
 if (cp.wrapped.name !== "Back" || !doorLive(cp.wrapped)) fail.push(`camera page: two swipes right from the second camera show ${JSON.stringify(cp.wrapped)}, expected to wrap to the last (Back) with its stream`);
+if (!cp.landedSnap[0] || cp.landedSnap[0] !== cp.landedSnap[1]) fail.push(`camera page: the camera that slid in showed ${cp.landedSnap[0]} but landed with ${cp.landedSnap[1]}, a new snapshot the old picture shows through until it loads`);
 if (cp.unmuted.mute !== "Mute") fail.push("camera page: the speaker button did not unmute");
 if (!cp.tileTops.length || cp.tileTops.some((t) => t !== "-7%")) fail.push(`camera page: picker tiles' tops are ${cp.tileTops.join(", ")}, expected the card's crop_top 7 (-7%) on each`);
 if (cp.tiles.join() !== "Front,Gone,Back") fail.push(`camera page: picker shows ${cp.tiles.join(", ")}, expected Front, Gone, Back`);
