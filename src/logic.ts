@@ -599,3 +599,34 @@ export function trackTime(seconds: number): string {
 
 /** repeat button cycle: off -> all -> one -> off */
 export const nextRepeat = (r: unknown): "off" | "all" | "one" => (r === "all" ? "one" : r === "one" ? "off" : "all");
+
+/** What the music page watcher remembers between looks: the player's last state, and since when it is quiet on the music page */
+export interface MusicWatch {
+  state?: string;
+  quietSince?: number;
+}
+
+/**
+ * One look at the player and the location (see music-page.ts). Opens the music page when the player starts
+ * playing, but not when it was already playing at the first look (a page load), not after a reconnect
+ * (unavailable -> playing), and not when the music page is already showing (play pressed there). Goes back
+ * home after `returnMs` of quiet on the music page; leaving the page resets the count. `wakeIn`: look again then.
+ */
+export function musicStep(w: MusicWatch, state: string | undefined, onMusic: boolean, now: number, returnMs: number): { go?: "music" | "home"; wakeIn?: number } {
+  const prev = w.state;
+  w.state = state;
+  if (state === "playing") {
+    w.quietSince = undefined;
+    const started = prev !== undefined && prev !== "playing" && prev !== "unavailable" && prev !== "unknown";
+    return started && !onMusic ? { go: "music" } : {};
+  }
+  if (!onMusic || returnMs <= 0) {
+    w.quietSince = undefined;
+    return {};
+  }
+  w.quietSince ??= now;
+  const left = w.quietSince + returnMs - now;
+  if (left > 0) return { wakeIn: left };
+  w.quietSince = undefined;
+  return { go: "home" };
+}

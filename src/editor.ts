@@ -64,6 +64,21 @@ export const GLASS_FIELDS: EditorField[] = [
   },
 ];
 
+/** the shared `music_page` option, nested under its own name */
+export const MUSIC_FIELDS: EditorField[] = [
+  {
+    name: "music_page",
+    type: "expandable",
+    title: "Open the music page when a player starts",
+    schema: [
+      { name: "entity", label: "Media player", selector: { entity: { filter: { domain: "media_player" } } } },
+      { name: "path", label: "Music page", helper: "A dashboard path such as /echo-show/music. Put this option on one card in every view.", selector: { text: {} } },
+      { name: "home_path", label: "Then go back to", helper: "A dashboard path such as /echo-show/home, once the player has been quiet on the music page. Leave empty to stay.", selector: { text: {} } },
+      { name: "return_after", label: "Go back after (seconds)", helper: "Default 60. 0 never goes back.", selector: { number: { min: 0, max: 3600, mode: "box", unit_of_measurement: "s" } } },
+    ],
+  },
+];
+
 const labelize = (name: string): string => name.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 
 export class HomeViewCardEditor extends LitElement {
@@ -81,7 +96,7 @@ export class HomeViewCardEditor extends LitElement {
     return html`<ha-form
       .hass=${this.hass}
       .data=${toFormList(this._config, this.listNames())}
-      .schema=${[...this.fields, ...GLASS_FIELDS]}
+      .schema=${[...this.fields, ...MUSIC_FIELDS, ...GLASS_FIELDS]}
       .computeLabel=${(s: EditorField) => s.label ?? labelize(s.name)}
       .computeHelper=${(s: EditorField) => s.helper}
       @value-changed=${this.changed}
@@ -95,7 +110,12 @@ export class HomeViewCardEditor extends LitElement {
   private changed(ev: CustomEvent<{ value: LovelaceCardConfig }>): void {
     ev.stopPropagation();
     const config: LovelaceCardConfig = fromFormList({ ...ev.detail.value }, this.listNames());
-    for (const [k, v] of Object.entries(config)) if (v === "" || v === undefined || v === null) delete config[k];
+    const blank = (v: unknown): boolean => v === "" || v === undefined || v === null;
+    if (config.music_page && typeof config.music_page === "object") {
+      const m = Object.fromEntries(Object.entries(config.music_page).filter(([, v]) => !blank(v)));
+      config.music_page = Object.keys(m).length ? m : undefined;
+    }
+    for (const [k, v] of Object.entries(config)) if (blank(v)) delete config[k];
     fireEvent(this, "config-changed", { config });
   }
 }

@@ -8,6 +8,10 @@
 # - Swipe Navigation (hass-swipe-navigation) for the swipes, set by `swipe_nav` below;
 # - a cover group of the four Family Room curtains, cover.family_room_curtains, so one tile opens and closes them all.
 #
+# Music: when the Echo starts playing (a voice "play X" too), whichever page is showing switches to Music, and a
+# minute after it stops there it goes back Home. Home Assistant only loads the cards of the page on screen, so one
+# card in every view carries the same `music_page` (written once as &music_page, then *music_page).
+#
 # Quadrant sizes in the 24-column section: a quadrant is 12 x 4, half a quadrant 6 x 4.
 title: Echo Show
 swipe_nav:
@@ -27,6 +31,11 @@ views:
           # top left: the time and date on the wallpaper
           - type: custom:homeview-clock-card
             face: digital
+            music_page: &music_page
+              entity: media_player.kitchen_display
+              path: /echo-show/music
+              home_path: /echo-show/home
+              return_after: 60
             grid_options: { columns: 12, rows: 4 }
           # top right: today's events, or what's next once today is done
           - type: custom:homeview-calendar-card
@@ -61,6 +70,7 @@ views:
         cards:
           - type: custom:homeview-clock-card
             face: digital
+            music_page: *music_page
             grid_options: { columns: 12, rows: 4 }
           # top right: what the Echo plays (tap for the Music page) and the front door
           - type: custom:homeview-tile-card
@@ -105,6 +115,7 @@ views:
         entity: media_player.kitchen_display
         name: Echo Show
         navigation_path: /echo-show/home
+        music_page: *music_page
 
   - title: Cameras
     path: cameras
@@ -114,6 +125,7 @@ views:
       # one live camera edge to edge; swipe for the next
       - type: custom:homeview-camera-card
         home_path: /echo-show/home
+        music_page: *music_page
         crop_top: 7           # every camera: hides the burned-in timestamp
         entities:
           - entity: camera.front_door
@@ -133,6 +145,7 @@ views:
       - type: custom:homeview-weather-card
         entity: weather.home
         forecast_days: 4
+        music_page: *music_page
 
   - title: Calendar
     path: calendar
@@ -142,6 +155,7 @@ views:
       - type: custom:homeview-calendar-card
         layout: list
         days: 14
+        music_page: *music_page
         entities:
           - calendar.personal
           - calendar.work

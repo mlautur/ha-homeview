@@ -730,6 +730,26 @@ result.cards = await cardsPage.evaluate(async () => {
   window.addEventListener("location-changed", () => navigated++);
   goes.shadowRoot.querySelector("button").click();
   out.navigate = { path: location.pathname, events: navigated };
+  // music page: two cards on Home share the option and open the music page once when the player starts;
+  // on the music page, a paused player goes back home after return_after
+  history.replaceState(null, "", "/echo-show/home");
+  const mp = { entity: "media_player.voice", path: "/echo-show/music", home_path: "/echo-show/home", return_after: 1 };
+  const withPlayer = (state) => ({ ...hass, states: { ...hass.states, "media_player.voice": st("media_player.voice", state, { friendly_name: "Voice" }) } });
+  const homeCards = [await make("homeview-clock-card", { face: "digital", music_page: mp }, 200, 100), await make("homeview-weather-card", { entity: "weather.home", music_page: mp }, 200, 100)];
+  const setAll = async (els, h) => { for (const el of els) el.hass = h; await Promise.all(els.map((el) => el.updateComplete)); };
+  await setAll(homeCards, withPlayer("idle"));
+  const before = navigated;
+  await setAll(homeCards, withPlayer("playing"));
+  out.musicOpen = { path: location.pathname, events: navigated - before };
+  homeCards.forEach((el) => el.remove());
+  const musicCard = await make("homeview-media-card", { entity: "media_player.voice", music_page: mp }, 480, 240);
+  await setAll([musicCard], withPlayer("playing"));
+  await setAll([musicCard], withPlayer("paused"));
+  await wait(400);
+  out.musicStays = location.pathname;
+  await wait(1000);
+  out.musicBack = location.pathname;
+  musicCard.remove();
   out.weather = text(weather);
   out.calendar = [...calendar.shadowRoot.querySelectorAll(".summary")].map((e) => e.textContent);
   out.calendarBadges = [...calendar.shadowRoot.querySelectorAll(".wd")].map((e) => e.textContent);
@@ -1043,9 +1063,11 @@ if (!/Partly Cloudy/.test(c.page.text) || !/64°/.test(c.page.text) || !/71° \/
   fail.push(`weather page: ${JSON.stringify(c.page)}, expected the condition, 64°, "71° / 54° · 40% rain", a Today column on a glass row and no glass card`);
 if (!/^\d{2}:\d{2}$/.test(c.digital.time ?? "") || !c.digital.date || c.digital.glassy) fail.push(`digital clock: ${JSON.stringify(c.digital)}, expected a 24-hour time from the profile, the date and no glass`);
 if (c.navigate.path !== "/echo-show/music" || c.navigate.events !== 1) fail.push(`tile navigate: ${JSON.stringify(c.navigate)}, expected /echo-show/music and one location-changed`);
+if (c.musicOpen.path !== "/echo-show/music" || c.musicOpen.events !== 1) fail.push(`music page: the player starting gave ${JSON.stringify(c.musicOpen)}, expected /echo-show/music and one location-changed from two cards`);
+if (c.musicStays !== "/echo-show/music" || c.musicBack !== "/echo-show/home") fail.push(`music page: paused on the music page it was at ${c.musicStays} after 0.4 s and ${c.musicBack} after 1.4 s, expected to stay, then go home after return_after 1 s`);
 console.log(JSON.stringify(c));
 if (fail.length) {
   console.error(`WebKit smoke FAILED:\n- ${fail.join("\n- ")}`);
   process.exit(1);
 }
-console.log("WebKit smoke passed: 5 cards defined and rendered, weather / up next / camera / vacuum / media tile / now playing show their data and make the right calls, camera live view and vacuum panel open and close, camera page streams one camera, swipes, wraps, unmutes, picks and goes home, digital clock / day and list calendars / weather page / tile navigate right, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly, photo frame recovers from lost answers, swipes and opens / closes its full-screen slideshow");
+console.log("WebKit smoke passed: 5 cards defined and rendered, weather / up next / camera / vacuum / media tile / now playing show their data and make the right calls, camera live view and vacuum panel open and close, camera page streams one camera, swipes, wraps, unmutes, picks and goes home, digital clock / day and list calendars / weather page / tile navigate right, music page opens on play and goes home after a pause, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly, photo frame recovers from lost answers, swipes and opens / closes its full-screen slideshow");

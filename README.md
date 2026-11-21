@@ -275,6 +275,24 @@ views:
 
 In a Sections view it spans the full width and 8 rows by default.
 
+#### Open the music page when something plays
+
+Any HomeView card can carry a `music_page` option: when the player starts playing, from a voice request such as "play some jazz" or anything else, the dashboard switches to the music page from whichever page is showing. Once the player has been paused, stopped or idle on the music page for `return_after` seconds, it goes back to `home_path`.
+
+```yaml
+music_page:
+  entity: media_player.echo_show   # the player to watch
+  path: /echo-show/music           # the view with the Now Playing card
+  home_path: /echo-show/home       # optional: go back here once it is quiet
+  return_after: 60                 # optional: seconds of quiet first (default 60, 0 stays)
+```
+
+- Home Assistant only loads the cards of the view on screen, so put the same option on one card in **every** view of the dashboard. In a YAML dashboard, write it once with an anchor (`music_page: &music_page ...`, then `music_page: *music_page`), as [`examples/echo-show.yaml`](examples/echo-show.yaml) does. Several cards with the same option act once.
+- It opens the page only when the player *starts*: not when the dashboard loads while it is already playing, not when Home Assistant reconnects, and not when the music page is already showing.
+- Swipe away from the music page and it leaves you there; coming back starts the quiet count again.
+- Nothing happens while the dashboard is being edited.
+- In the visual editor it is the *Open the music page when a player starts* group.
+
 ### Swipe Navigation
 
 [Swipe Navigation](https://github.com/zanna-37/hass-swipe-navigation) swipes between dashboard views, for example from the panel to a view of cameras. It works with HomeView. Swipes on the photo frame still change the picture, and swipes on a camera page change the camera; neither changes the view.
@@ -309,7 +327,7 @@ For the full HomeView look:
 [`examples/echo-show.yaml`](examples/echo-show.yaml) turns a 2:1 screen such as an Echo Show 5 (960x480) into a bedside clock with swipeable pages, laid out like a quadrant grid: the time top left on the wallpaper, and the other quadrants filled with cards.
 - **Home**: the digital clock and the calendar's day panel along the top, Mavis (the voice card mirroring the Echo's own satellite) and the weather along the bottom.
 - **Controls**: the clock, a Now Playing tile that opens the Music page, the front door lock, the weather, the vacuum and one tile for a group of curtains.
-- **Music**, **Cameras**, **Weather** and **Calendar**: full-screen `panel` views.
+- **Music**, **Cameras**, **Weather** and **Calendar**: full-screen `panel` views. Music opens by itself when the Echo starts playing, and goes back Home a minute after it stops there ([`music_page`](#open-the-music-page-when-something-plays)).
 
 Its Sections views use the `homeview-echo` theme from [`examples/echo-show-theme.yaml`](examples/echo-show-theme.yaml): a 4.5vh edge and 4.5vh gaps, and 7.4375vh rows, so a 12x4 card is exactly a quadrant (447.6 x 207.6px at 960x480). It needs a kiosk mode that hides the header, and [Swipe Navigation](#swipe-navigation) for the swipes.
 
