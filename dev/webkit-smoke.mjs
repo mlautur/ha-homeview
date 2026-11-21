@@ -736,7 +736,9 @@ result.cards = await cardsPage.evaluate(async () => {
     const vol = q(".pop input");
     out.np.volumeOpen = !!vol && !btn("Shuffle");
     if (vol) {
+      // as a browser does: input while the thumb moves, then change on release
       vol.value = "60";
+      vol.dispatchEvent(new Event("input"));
       vol.dispatchEvent(new Event("change"));
     }
     // a tap elsewhere closes the slider
@@ -912,6 +914,8 @@ const want = [
   ["media_player.shuffle_set", "media_player.echo", { shuffle: true }],
   ["media_player.repeat_set", "media_player.echo", { repeat: "all" }],
   ["media_player.media_seek", "media_player.echo", { seek_position: 100 }],
+  ["media_player.volume_set", "media_player.echo", { volume_level: 0.6 }],
+  // the release resends the last level, which the 250 ms throttle may have skipped
   ["media_player.volume_set", "media_player.echo", { volume_level: 0.6 }],
   ["vacuum.send_command", "vacuum.robot", { command: "app_segment_clean", params: [{ segments: [16], repeat: 1 }] }],
   ["vacuum.set_fan_speed", "vacuum.robot", { fan_speed: "max" }],
