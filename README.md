@@ -193,7 +193,10 @@ entities:
     name: Front Door      # optional
   - camera.backyard
 home_path: /wall/home     # where the home button goes (the dashboard's first view)
+crop_top: 0               # as on the tile, for every camera on the page and in the grid
 ```
+
+In a panel view, or a Sections cell with a set number of rows, the page fills its space; anywhere else it takes a 2:1 shape (the Echo Show's).
 
 One camera fills the card edge to edge, live (Home Assistant's own player). Swipe left or right, or use the arrow keys, for the next or previous camera; it wraps around. Over the picture:
 - the camera's name, top left;
