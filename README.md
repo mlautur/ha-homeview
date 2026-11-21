@@ -5,12 +5,12 @@ A card pack that brings an Apple HomeView-style wall panel to Home Assistant. Re
 | Card | Type | What it does |
 |---|---|---|
 | Thermostat | `custom:homeview-thermostat-card` | Big setpoint with a spring roll and chevrons. Single and heat/cool setpoints. Calls are debounced. |
-| Tile | `custom:homeview-tile-card` | Light, switch, fan, lock (optional unlock confirm), cover, scene, script, media player (what is playing; tap plays / pauses). Tap acts, hold opens more-info. |
-| Clock | `custom:homeview-clock-card` | Analog clock on a round glass face. Smooth, ticking or hidden seconds hand. |
+| Tile | `custom:homeview-tile-card` | Light, switch, fan, lock (optional unlock confirm), cover, scene, script, media player (what is playing; tap plays / pauses). Tap acts or opens a view, hold opens more-info. |
+| Clock | `custom:homeview-clock-card` | Analog clock on a round glass face (smooth, ticking or hidden seconds hand), or a big digital time and date on the wallpaper. |
 | Photo frame | `custom:homeview-photo-card` | Slideshow from one or more Home Assistant media source folders (local media, DLNA, Synology Photos, ...). Swipe for the next or previous picture; tap for a full-screen slideshow. |
 | Voice | `custom:homeview-voice-card` | Talk to Assist with an audio-reactive visualizer, or mirror an `assist_satellite` device. |
-| Weather | `custom:homeview-weather-card` | Time and date, a big temperature, the condition, and today's high, low and chance of rain. |
-| Up next | `custom:homeview-calendar-card` | A strip with the next events from one or more calendars. |
+| Weather | `custom:homeview-weather-card` | Time and date, a big temperature, the condition, and today's high, low and chance of rain. Or a full weather page with the next days. |
+| Up next | `custom:homeview-calendar-card` | The next events from one or more calendars: a strip, a day panel (today, else what's next) or a full-page agenda. |
 | Camera | `custom:homeview-camera-card` | Snapshot tile, refreshed every few seconds. Tap for the live stream full screen. With `entities`, a full-screen page of live cameras to swipe through. |
 | Vacuum | `custom:homeview-vacuum-card` | Robot vacuum tile. Tap for a panel with the map, rooms, start / pause / dock / locate, suction and mop modes. |
 | Now Playing | `custom:homeview-media-card` | One media player full screen: album art over a blurred copy of it, a seekable progress bar, previous / play / next, volume, shuffle and repeat. |
@@ -85,7 +85,8 @@ entity: lock.front_door
 name: Door Lock
 subtitle: Front Door
 confirm_unlock: true      # locks: first tap asks "Tap again to unlock"
-tap_action: toggle        # toggle (default) | more-info | none
+tap_action: toggle        # toggle (default) | more-info | navigate | none
+navigation_path: /lovelace/music   # with tap_action: navigate, the view to open
 icon: mdi:door            # optional; HomeView glyphs are used by default
 ```
 
@@ -95,13 +96,16 @@ Active states:
 - Fans spin.
 - Scenes flash when run.
 
-A media player tile shows the title and artist of what is playing, with the album art when there is one. Tap plays or pauses.
+A media player tile shows the title and artist of what is playing, with the album art when there is one. Tap plays or pauses. With `tap_action: navigate` a tap opens `navigation_path` instead, for example a Now Playing view; hold still opens more-info.
 
 ```yaml
 type: custom:homeview-clock-card
-seconds: sweep            # sweep | tick | off
+face: analog              # analog (default) | digital
+seconds: sweep            # analog: sweep | tick | off
 time_zone: Europe/Paris   # optional
 ```
+
+`face: digital` shows a big time and the date straight on the wallpaper, with no glass, for example in the top-left quadrant of a bedside screen. It follows the 12 or 24 hour setting in your Home Assistant profile and leaves out AM / PM. The time and date scale with the cell; give it a fixed height on the Layout tab (6x3 by default).
 
 ```yaml
 type: custom:homeview-photo-card
@@ -161,17 +165,30 @@ show_time: true           # the time and date along the top
 The forecast streams from Home Assistant, so the card updates when the weather entity does. A forecast that has no chance of rain shows the expected amount instead. Tap for Home Assistant's weather dialog. In a short, wide cell the card leaves out the time and puts the high, low and rain beside the temperature.
 
 ```yaml
+type: custom:homeview-weather-card
+entity: weather.home
+forecast_days: 4          # 1-7: a full weather page
+```
+
+With `forecast_days` the card becomes a weather page, made for a `panel` view: the condition and the place top left, a huge temperature with today's high, low and rain top right, and a glass row of the next days (high, low, condition, day) along the bottom. The text sits on the wallpaper; the time is not shown. Daily and twice-daily forecasts both work.
+
+```yaml
 type: custom:homeview-calendar-card
 entities:
   - calendar.family
   - entity: calendar.school
     color: "#30d158"      # optional; each calendar gets its own colour by default
-title: Up next            # optional
+layout: strip             # strip (default) | day | list
+title: Up next            # optional (strip and day)
 days: 14                  # how far ahead to look (7)
-count: 3                  # at most this many events; fewer when the strip is narrow
+count: 3                  # at most this many events (strip: 3; day and list: as many as fit)
 ```
 
-Each event has a day badge (TODAY, or the weekday), its title, a dot in its calendar's colour and its time or "All day". Events that ended drop off. An event that is still going counts as today. The card reads the calendars again every 15 minutes, and whenever a calendar starts or ends an event. Size it as a strip, for example full width by 2 rows.
+Each event has a day badge (TODAY, or the weekday), its title, a dot in its calendar's colour and its time or "All day". Events that ended drop off. An event that is still going counts as today. An event with no title, as a free/busy-only shared calendar sends, reads *Busy*. The card reads the calendars again every 15 minutes, and whenever a calendar starts or ends an event. Size it as a strip, for example full width by 2 rows.
+
+Two more layouts:
+- `layout: day`: a glass panel headed *Today* with what is left of today, each event with a bar in its calendar's colour, its title and time; the one under way is highlighted. Rows left over show what comes next, with the day ("Tomorrow · 6:00 PM"). Once today is done the panel reads *Up next* and *Nothing else today*. It fits a quadrant (12x4 in a two-column section shows three events) and shows more when it is taller.
+- `layout: list`: a full-page agenda for a `panel` view, straight on the wallpaper. One row per event: a date badge (today's on glass), the title and time, and how far off it is ("today", "tomorrow", "in 3 days"). Events on the same day share one badge. It shows as many as fit.
 
 ```yaml
 type: custom:homeview-camera-card
@@ -286,6 +303,15 @@ For the full HomeView look:
 - It fits 1280x800, 1180x820 and 1024x768 without scrolling, with the sidebar hidden. A docked sidebar takes 256px, so the wide layout then needs a 1344px screen.
 - Sections columns are at least 320px wide: three columns from 1088px, two from 736px, one below. The example keeps one section per width and hides the others with a *Screen* visibility condition. The two-column one drops three tiles; the phone one stacks everything in one column.
 - Cards in a hidden section pause: no clock or visualizer frames, no photo folder listing and no photo downloads until they are shown.
+
+## Bedside screen (Echo Show)
+
+[`examples/echo-show.yaml`](examples/echo-show.yaml) turns a 2:1 screen such as an Echo Show 5 (960x480) into a bedside clock with swipeable pages, laid out like a quadrant grid: the time top left on the wallpaper, and the other quadrants filled with cards.
+- **Home**: the digital clock, Mavis (the voice card mirroring the Echo's own satellite) and the calendar's day panel down the right.
+- **Controls**: the clock, a Now Playing tile that opens the Music page, the front door lock, the weather, the vacuum and one tile for a group of curtains.
+- **Music**, **Cameras**, **Weather** and **Calendar**: full-screen `panel` views.
+
+Its Sections views use the `homeview-echo` theme from [`examples/echo-show-theme.yaml`](examples/echo-show-theme.yaml): a 4.5vh edge and 4.5vh gaps, and 7.4375vh rows, so a 12x4 card is exactly a quadrant (447.6 x 207.6px at 960x480). It needs a kiosk mode that hides the header, and [Swipe Navigation](#swipe-navigation) for the swipes.
 
 ## Performance
 

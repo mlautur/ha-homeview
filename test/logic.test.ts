@@ -232,7 +232,8 @@ test("voice: failures become a short status line and keep the full detail", () =
 });
 
 import {
-  calendarTime, cameraPages, cropTop, dayBadge, eventTime, forecastType, mediaLines, roborockRooms, snapshotUrl, todayOutlook, upcoming, vacuumStatus, weatherName, pickerColumns, wrap,
+  calendarTime, cameraPages, clockText, cropTop, dayAgenda, dayBadge, eventTime, eventTitle, forecastDays, forecastType, mediaLines, pickerColumns, relativeDay,
+  roborockRooms, snapshotUrl, todayOutlook, upcoming, vacuumStatus, weatherName, wrap,
 } from "../src/logic.ts";
 
 test("media tile: playing, paused and idle lines; tap toggles play / pause", () => {
@@ -276,12 +277,70 @@ test("calendar: all-day dates are local, ended events drop, soonest first", () =
     { summary: "Holiday", start: "2026-11-21", end: "2026-11-22" },
   ];
   assert.deepEqual(upcoming(events, now, 3).map((e) => e.summary), ["Now", "Holiday", "Later"]);
-  assert.deepEqual(dayBadge(events[2], now, "en-US"), { label: "TODAY", day: 20, today: true });
-  assert.deepEqual(dayBadge(events[0], now, "en-US"), { label: "SUN", day: 22, today: false });
+  assert.deepEqual(dayBadge(events[2], now, "en-US"), { label: "TODAY", day: 20, today: true, weekday: "Fri", month: "NOV", key: "2026-10-20" });
+  assert.deepEqual(dayBadge(events[0], now, "en-US"), { label: "SUN", day: 22, today: false, weekday: "Sun", month: "NOV", key: "2026-10-22" });
   // started yesterday, still going: today
   assert.equal(dayBadge({ summary: "Trip", start: "2026-11-19", end: "2026-11-23" }, now, "en-US").label, "TODAY");
   assert.equal(eventTime(events[3], "en-US"), "All day");
   assert.equal(eventTime(events[0], "en-US"), "9:00 AM – 10:00 AM");
+});
+
+test("calendar: day view is what is left of today, else what's next", () => {
+  const now = new Date(2026, 10, 20, 12, 0);
+  const at = (d: number, h: number) => new Date(2026, 10, d, h).toISOString();
+  const events = [
+    { summary: "Dinner", start: at(20, 18), end: at(20, 19) },
+    { summary: "Lunch", start: at(20, 11), end: at(20, 13) },
+    { summary: "Breakfast", start: at(20, 8), end: at(20, 9) },
+    { summary: "Dentist", start: at(23, 9), end: at(23, 10) },
+  ];
+  // today's two left, then the next to fill the rows
+  assert.deepEqual(dayAgenda(events, now, 5), { today: 2, events: [events[1], events[0], events[3]] });
+  assert.deepEqual(dayAgenda(events, now, 1), { today: 2, events: [events[1]] });
+  // today is done: what's next instead
+  const late = new Date(2026, 10, 20, 20, 0);
+  assert.deepEqual(dayAgenda(events, late, 5), { today: 0, events: [events[3]] });
+  assert.deepEqual(dayAgenda([], late, 5), { today: 0, events: [] });
+  // an all-day event today counts as today
+  assert.equal(dayAgenda([{ summary: "Holiday", start: "2026-11-20", end: "2026-11-21" }], late, 5).today, 1);
+  assert.equal(relativeDay(events[1], now, "en-US"), "today");
+  assert.equal(relativeDay({ summary: "x", start: "2026-11-21", end: "2026-11-22" }, now, "en-US"), "tomorrow");
+  assert.equal(relativeDay(events[3], now, "en-US"), "in 3 days");
+});
+
+test("calendar: a free/busy-only event has no title and reads Busy", () => {
+  const now = new Date(2026, 10, 20, 12, 0);
+  const at = (h: number) => new Date(2026, 10, 20, h).toISOString();
+  const events = [{ summary: "", start: at(14), end: at(15) }, { start: at(13), end: at(14) } as never, { summary: "  ", start: at(14), end: at(15) }];
+  assert.deepEqual(upcoming(events, now, 3).map(eventTitle), ["Busy", "Busy", "Busy"]);
+  assert.equal(eventTitle({ summary: " Gym ", start: at(1), end: at(2) }), "Gym");
+});
+
+test("clock: digital time follows the profile's 12 / 24 hour setting, without AM / PM", () => {
+  const d = new Date(2026, 10, 21, 15, 7);
+  assert.deepEqual(clockText(d, "en-US", "language"), { time: "3:07", date: "Saturday, November 21" });
+  assert.equal(clockText(d, "en-US", "24").time, "15:07");
+  assert.equal(clockText(d, "en-GB", "language").time, "15:07");
+  assert.equal(clockText(d, "en-GB", "12").time, "3:07");
+  assert.equal(clockText(new Date(Date.UTC(2026, 10, 21, 23, 30)), "en-US", "24", "Asia/Tokyo").time, "08:30");
+});
+
+test("weather: forecast days from a daily or a twice-daily forecast", () => {
+  const daily = [1, 2, 3, 4, 5].map((d) => ({ datetime: `2026-11-2${d}T12:00:00Z`, condition: "sunny", temperature: 60 + d, templow: 40 + d, precipitation_probability: d * 10 }));
+  assert.deepEqual(forecastDays(daily, 4).map((d) => [d.high, d.low, d.rain]), [[61, 41, 10], [62, 42, 20], [63, 43, 30], [64, 44, 40]]);
+  assert.deepEqual(forecastDays(undefined, 4), []);
+  const t = (d: number, h: number) => new Date(2026, 10, d, h).toISOString();
+  const twice = [
+    { datetime: t(21, 18), is_daytime: false, condition: "clear-night", temperature: 41, precipitation_probability: 5 },
+    { datetime: t(22, 6), is_daytime: true, condition: "rainy", temperature: 55, precipitation_probability: 70 },
+    { datetime: t(22, 18), is_daytime: false, condition: "rainy", temperature: 44, precipitation_probability: 80 },
+    { datetime: t(23, 6), is_daytime: true, condition: "sunny", temperature: 58 },
+  ];
+  assert.deepEqual(forecastDays(twice, 3), [
+    { datetime: t(21, 18), condition: "clear-night", high: undefined, low: 41, rain: 5 },
+    { datetime: t(22, 6), condition: "rainy", high: 55, low: 44, rain: 80 },
+    { datetime: t(23, 6), condition: "sunny", high: 58, low: undefined, rain: undefined },
+  ]);
 });
 
 test("camera: snapshot URL changes once per interval", () => {

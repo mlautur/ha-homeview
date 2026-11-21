@@ -1,0 +1,144 @@
+# HomeView on an Echo Show 5 (960x480, landscape) as a bedside screen: no navigation bar, swipe between pages.
+# Home and Controls are a 2x2 grid of quadrants with the clock top left; Music, Cameras, Weather and Calendar fill
+# the screen. Dashboard URL: /echo-show (the tile on Controls opens /echo-show/music).
+#
+# Needs:
+# - the homeview-echo theme from examples/echo-show-theme.yaml (the quadrant spacing of the Sections views);
+# - a kiosk mode that hides the header, so the views get the whole screen;
+# - Swipe Navigation (hass-swipe-navigation) for the swipes, set by `swipe_nav` below;
+# - a cover group of the four Family Room curtains, cover.family_room_curtains, so one tile opens and closes them all.
+#
+# Quadrant sizes in the 24-column section: a quadrant is 12 x 4, half a quadrant 6 x 4, the right column 12 x 8.
+title: Echo Show
+swipe_nav:
+  wrap: true
+  animate: swipe
+views:
+  - title: Home
+    path: home
+    icon: mdi:home
+    type: sections
+    max_columns: 2
+    theme: homeview-echo
+    sections:
+      - type: grid
+        column_span: 2
+        cards:
+          # top left: the time and date on the wallpaper
+          - type: custom:homeview-clock-card
+            face: digital
+            grid_options: { columns: 12, rows: 4 }
+          # right column: today's events, or what's next once today is done
+          - type: custom:homeview-calendar-card
+            layout: day
+            entities:
+              - calendar.mlautur1_gmail_com
+              - calendar.marcelin_lauture_saks_com
+              - calendar.holidays_in_united_states
+              - calendar.birthdays_2
+            grid_options: { columns: 12, rows: 8 }
+          # bottom left: Mavis, mirroring the Echo's own voice satellite
+          - type: custom:homeview-voice-card
+            name: Mavis
+            speak: true
+            satellite: assist_satellite.vaca_amzn_echo_show_5_2bc2
+            grid_options: { columns: 12, rows: 4 }
+
+  - title: Controls
+    path: controls
+    icon: mdi:toggle-switch
+    type: sections
+    max_columns: 2
+    theme: homeview-echo
+    sections:
+      - type: grid
+        column_span: 2
+        cards:
+          - type: custom:homeview-clock-card
+            face: digital
+            grid_options: { columns: 12, rows: 4 }
+          # top right: what the Echo plays (tap for the Music page) and the front door
+          - type: custom:homeview-tile-card
+            entity: media_player.echo_show
+            name: Echo Show
+            tap_action: navigate
+            navigation_path: /echo-show/music
+            grid_options: { columns: 6, rows: 4 }
+          - type: custom:homeview-tile-card
+            entity: lock.front_door_level_bolt_lock_mechanism
+            name: Front Door
+            subtitle: Lock
+            confirm_unlock: true
+            grid_options: { columns: 6, rows: 4 }
+          # bottom left: the weather, without the time (the clock is above it)
+          - type: custom:homeview-weather-card
+            entity: weather.temple
+            show_time: false
+            grid_options: { columns: 12, rows: 4 }
+          # bottom right: the vacuum and all four Family Room curtains in one tile
+          - type: custom:homeview-vacuum-card
+            entity: vacuum.s7_max_ultra
+            name: Vacuum
+            modes:
+              - select.family_room_s7_max_ultra_cleaning_mode
+              - select.s7_max_ultra_mop_mode
+              - select.s7_max_ultra_mop_intensity
+            grid_options: { columns: 6, rows: 4 }
+          - type: custom:homeview-tile-card
+            entity: cover.family_room_curtains
+            name: Curtains
+            subtitle: Family Room
+            grid_options: { columns: 6, rows: 4 }
+
+  - title: Music
+    path: music
+    icon: mdi:music
+    type: panel
+    cards:
+      # Now Playing on the Echo's own speaker
+      - type: custom:homeview-media-card
+        entity: media_player.echo_show
+
+  - title: Cameras
+    path: cameras
+    icon: mdi:cctv
+    type: panel
+    cards:
+      # one live camera edge to edge; swipe for the next
+      - type: custom:homeview-camera-card
+        entities:
+          - entity: camera.g6_pro_bullet_high_resolution_channel
+            name: Front Door
+            crop_top: 7
+          - entity: camera.g6_dome_high_resolution_channel
+            name: Backyard Dome
+            crop_top: 7
+          - entity: camera.g6_bullet_high_resolution_channel
+            name: Backyard Bullet
+            crop_top: 7
+          - entity: camera.g4_instant_high_resolution_channel
+            name: Kids Room
+            crop_top: 7
+
+  - title: Weather
+    path: weather
+    icon: mdi:weather-partly-cloudy
+    type: panel
+    cards:
+      - type: custom:homeview-weather-card
+        entity: weather.temple
+        forecast_days: 4
+
+  - title: Calendar
+    path: calendar
+    icon: mdi:calendar
+    type: panel
+    cards:
+      - type: custom:homeview-calendar-card
+        layout: list
+        days: 14
+        entities:
+          - calendar.mlautur1_gmail_com
+          - calendar.marcelin_lauture_saks_com
+          - calendar.holidays_in_united_states
+          - calendar.birthdays_2

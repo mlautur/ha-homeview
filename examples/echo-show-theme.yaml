@@ -1,0 +1,15 @@
+# HomeView Echo: the quadrant spacing of a 2:1 bedside screen (Echo Show 5 at 960x480, Echo Show 8 at 1280x800).
+# Put it in your themes folder (frontend: themes: !include_dir_merge_named themes) and reload themes.
+# examples/echo-show.yaml sets it on its Sections views with `theme: homeview-echo`.
+#
+# The screen is a 2x2 grid of quadrants with a 4.5vh edge and 4.5vh gaps (21.6px at 960x480, so each quadrant is
+# 447.6 x 207.6px). A Sections grid section spanning two columns has 24 columns; a quadrant is 12 columns by 4 rows,
+# and 4 rows plus 3 gaps fill (100vh - 3 x 4.5vh) / 2 when a row is 7.4375vh. The view needs no header (a kiosk mode).
+homeview-echo:
+  # the view: 4.5vh at the left and right edges, above the first row and below the last
+  ha-view-sections-column-gap: 4.5vh
+  ha-view-sections-row-gap: 4.5vh
+  # inside the section: 4.5vh between cards, 7.4375vh rows
+  ha-section-grid-column-gap: 4.5vh
+  ha-section-grid-row-gap: 4.5vh
+  ha-section-grid-row-height: 7.4375vh
