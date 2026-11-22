@@ -1,14 +1,14 @@
 /**
  * The camera card's page mode (`entities:`): one live camera filling the card edge to edge, made for
- * a panel view. Swipe left / right (or the arrow keys) for the next / previous camera, wrapping
- * around; the grid button picks one from all of them; the speaker unmutes; the home button leaves
+ * a panel view. Swipe left / right (or the arrow keys) for the next / previous camera; a swipe past
+ * the last or first camera is left to Swipe Navigation, for the next / previous view; the grid button picks one from all of them; the speaker unmutes; the home button leaves
  * for another view. Only the camera on screen streams, and only while the page is visible.
  */
 import { LitElement, css, html, nothing, type PropertyValues, type TemplateResult } from "lit";
 import { keyed } from "lit/directives/keyed.js";
 import { friendlyName, isUnavailable, type Hass } from "../ha.ts";
 import { ICONS } from "../icons.ts";
-import { cameraPages, cropTop, pickerColumns, within, wrap, type CameraPage } from "../logic.ts";
+import { cameraPages, cameraStep, cropTop, pickerColumns, within, type CameraPage } from "../logic.ts";
 import { trackGestures } from "../util/gesture.ts";
 import { SLIDE_MS } from "./photo-stage.ts";
 
@@ -19,6 +19,9 @@ export interface CameraPageConfig {
   /** where the home button goes (default: the dashboard's first view) */
   home_path?: string;
 }
+
+/** the ends of a drag, where Swipe Navigation decides to change the view */
+const ENDS = ["touchend", "touchcancel", "mouseup"];
 
 /** space between two cameras while one slides in, as in the photo frame */
 const GAP = 16;
@@ -83,6 +86,8 @@ export class HomeViewCameraPage extends LitElement {
   /** the page intersects the viewport (not display:none, not scrolled away) */
   private inView = false;
   private untrack?: () => void;
+  /** the drag under way moves between cameras (or is on the picker): Swipe Navigation must not also change the view */
+  private ours = false;
   private watchers?: { io: IntersectionObserver; ro: ResizeObserver };
 
   private get cams(): CameraPage[] {
@@ -97,12 +102,14 @@ export class HomeViewCameraPage extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     document.addEventListener("visibilitychange", this.onVisible);
+    for (const t of ENDS) window.addEventListener(t, this.claim, true);
     if (this.hasUpdated) this.watch();
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     document.removeEventListener("visibilitychange", this.onVisible);
+    for (const t of ENDS) window.removeEventListener(t, this.claim, true);
     this.untrack?.();
     this.untrack = undefined;
     this.watchers?.io.disconnect();
@@ -117,7 +124,7 @@ export class HomeViewCameraPage extends LitElement {
   }
 
   protected willUpdate(changed: PropertyValues): void {
-    if (changed.has("config")) this._cur = wrap(this._cur, this.cams.length);
+    if (changed.has("config")) this._cur = this.at(this._cur);
     if (!this.asked && this.cams.length && this.hass) {
       this.asked = true;
       void cameraPlayer(this.cams[0].entity).then((ok) => (this._player = ok));
@@ -156,26 +163,45 @@ export class HomeViewCameraPage extends LitElement {
   // ---- moving between cameras ----
 
   private dragTo(dx: number): void {
+    const into = cameraStep(this._cur, dx < 0 ? 1 : -1, this.cams.length) !== null;
+    this.ours = this._picker || into;
     if (this._picker) return;
     this.finishSlide();
     this._still = true;
-    this._drag = this.cams.length < 2 ? dx / 3 : dx; // a single camera resists
+    this._drag = into ? dx : dx / 3; // past the first or last camera it resists, and the view may change instead
   }
 
   private dragEnd(g: string | null): void {
     if (this._picker) return;
-    if ((g === "left" || g === "right") && this.cams.length > 1) return this.step(g === "left" ? 1 : -1);
+    if (g === "left" || g === "right") return this.step(g === "left" ? 1 : -1);
     this._still = false;
     this._drag = 0;
   }
 
+  /**
+   * Swipe Navigation watches every touch from above the card and changes the view when it ends; it
+   * never sees the end of a drag between cameras, so only a swipe past the first or last camera
+   * changes the view. A capture listener on window runs before it (pointerup comes before touchend
+   * and mouseup, but `ours` is set while dragging, so the order does not matter).
+   */
+  private claim = (e: Event): void => {
+    if (!this.ours) return;
+    this.ours = false;
+    e.stopPropagation();
+  };
+
   /** slide to the next (1) or previous (-1) camera */
   private step(dir: 1 | -1): void {
-    if (this.cams.length < 2) return;
     if (this._slide) {
       // a second swipe while the last camera still slides in: land that one first, then slide on from it
       this.finishSlide();
       void this.moveAgain().then(() => this.step(dir));
+      return;
+    }
+    if (cameraStep(this._cur, dir, this.cams.length) === null) {
+      // past the first or last camera: spring back
+      this._still = false;
+      this._drag = 0;
       return;
     }
     clearTimeout(this.slideTimer);
@@ -202,11 +228,16 @@ export class HomeViewCameraPage extends LitElement {
 
   /** put camera i on screen at once (the picker, or the end of a slide) */
   private show(i: number): void {
-    this._cur = wrap(i, this.cams.length);
+    this._cur = this.at(i);
     this._slide = 0;
     this._drag = 0;
     this._still = true;
     this._muted = true;
+  }
+
+  /** a camera index within the page's cameras */
+  private at(i: number): number {
+    return Math.max(0, Math.min(i, this.cams.length - 1));
   }
 
   private togglePicker = (): void => {
@@ -265,8 +296,8 @@ export class HomeViewCameraPage extends LitElement {
   /** one camera at `off` from the one on screen (-1, 0, 1) */
   private camAt(off: number): TemplateResult | typeof nothing {
     const cams = this.cams;
-    if (off && cams.length < 2) return nothing;
-    const c = cams[wrap(this._cur + off, cams.length)];
+    if (off && cameraStep(this._cur, off as 1 | -1, cams.length) === null) return nothing;
+    const c = cams[this._cur + off];
     const s = this.hass?.states[c.entity];
     const snap = this.snapshot(c);
     const hint = !s ? "Camera not found" : isUnavailable(s) ? "Offline" : "";
@@ -303,15 +334,13 @@ export class HomeViewCameraPage extends LitElement {
   protected render(): TemplateResult {
     const cams = this.cams;
     if (!cams.length || !this.hass) return html``;
-    const c = cams[wrap(this._cur, cams.length)];
+    const c = cams[this.at(this._cur)];
     const s = this.hass.states[c.entity];
     const live = !!s && !isUnavailable(s);
     const name = this.nameOf(c);
     const many = cams.length > 1;
-    // "swiper": Swipe Navigation (swipes between dashboard views) leaves drags on that class alone,
-    // so a swipe here changes the camera, not the view
     return html`<div
-      class="stage swiper ${this._still ? "still" : ""}"
+      class="stage ${this._still ? "still" : ""}"
       role="region"
       aria-roledescription="carousel"
       aria-label="Cameras: ${name}, ${this._cur + 1} of ${cams.length}"
@@ -354,7 +383,7 @@ export class HomeViewCameraPage extends LitElement {
       overflow: hidden;
       background: #000;
       outline: none;
-      /* every drag is ours: horizontal ones change the camera, and none scrolls or changes the view */
+      /* no drag scrolls: horizontal ones change the camera, or past the first or last one the view (Swipe Navigation) */
       touch-action: none;
       user-select: none;
       -webkit-user-select: none;

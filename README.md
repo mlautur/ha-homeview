@@ -216,14 +216,14 @@ crop_top: 0               # as on the tile, for every camera on the page and in 
 
 In a panel view, or a Sections cell with a set number of rows, the page fills its space; anywhere else it takes a 2:1 shape (the Echo Show's).
 
-One camera fills the card edge to edge, live (Home Assistant's own player). Swipe left or right, or use the arrow keys, for the next or previous camera; it wraps around. Over the picture:
+One camera fills the card edge to edge, live (Home Assistant's own player). Swipe left or right, or use the arrow keys, for the next or previous camera. Over the picture:
 - the camera's name, top left;
 - a home button, top right, that goes to `home_path`;
 - the grid button, bottom left: every camera at once, tap one to show it;
 - one dot per camera, bottom centre;
 - the speaker button, bottom right. The page starts muted and mutes again on another camera or when it is hidden.
 
-Only the camera on screen streams, and only while the page is visible: on another view, a hidden tab or a screen that is off, nothing streams. Swipes here change the camera, not the view, with [Swipe Navigation](#swipe-navigation) too; use the home button to leave.
+Only the camera on screen streams, and only while the page is visible: on another view, a hidden tab or a screen that is off, nothing streams. With [Swipe Navigation](#swipe-navigation), swipes between cameras change the camera, not the view; a swipe left on the last camera goes to the next view, and a swipe right on the first one to the previous view. The home button leaves too.
 
 ```yaml
 type: custom:homeview-vacuum-card
@@ -312,7 +312,7 @@ voice_overlay:
 
 ### Swipe Navigation
 
-[Swipe Navigation](https://github.com/zanna-37/hass-swipe-navigation) swipes between dashboard views, for example from the panel to a view of cameras. It works with HomeView. Swipes on the photo frame still change the picture, and swipes on a camera page change the camera; neither changes the view.
+[Swipe Navigation](https://github.com/zanna-37/hass-swipe-navigation) swipes between dashboard views, for example from the panel to a view of cameras. It works with HomeView. Swipes on the photo frame still change the picture, not the view. Swipes on a camera page change the camera, and past the last or first camera they change the view.
 
 ### Voice needs HTTPS for the microphone
 

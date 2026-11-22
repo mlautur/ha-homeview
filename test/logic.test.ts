@@ -232,8 +232,8 @@ test("voice: failures become a short status line and keep the full detail", () =
 });
 
 import {
-  calendarTime, cameraPages, clockText, cropTop, dayAgenda, dayBadge, eventTime, eventTitle, forecastDays, forecastType, mediaLines, pickerColumns, relativeDay,
-  roborockRooms, snapshotUrl, todayOutlook, upcoming, vacuumStatus, weatherName, wrap,
+  calendarTime, cameraPages, cameraStep, clockText, cropTop, dayAgenda, dayBadge, eventTime, eventTitle, forecastDays, forecastType, mediaLines, pickerColumns, relativeDay,
+  roborockRooms, snapshotUrl, todayOutlook, upcoming, vacuumStatus, weatherName,
 } from "../src/logic.ts";
 
 test("media tile: playing, paused and idle lines; tap toggles play / pause", () => {
@@ -363,10 +363,13 @@ test("camera page: cameras from ids or objects, crop clamped", () => {
   assert.equal(cropTop("x"), 0);
 });
 
-test("camera page: swiping wraps around, picker columns", () => {
-  assert.equal(wrap(4, 4), 0);
-  assert.equal(wrap(-1, 4), 3);
-  assert.equal(wrap(5, 0), 0);
+test("camera page: swipes step between cameras, past the ends they leave the page; picker columns", () => {
+  assert.equal(cameraStep(0, 1, 3), 1);
+  assert.equal(cameraStep(2, -1, 3), 1);
+  assert.equal(cameraStep(2, 1, 3), null); // past the last camera: the next view
+  assert.equal(cameraStep(0, -1, 3), null); // before the first: the previous view
+  assert.equal(cameraStep(0, 1, 1), null); // a single camera: every swipe leaves
+  assert.equal(cameraStep(0, -1, 1), null);
   assert.deepEqual([1, 2, 3, 4, 5, 6].map(pickerColumns), [1, 2, 3, 2, 3, 3]);
 });
 

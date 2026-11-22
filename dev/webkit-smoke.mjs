@@ -17,8 +17,8 @@
 // swipes along with the card, and closes on a swipe down, on Escape and by itself after 3 hours.
 // or if the weather, up next, camera, vacuum or media cards show the wrong data, make the wrong service calls, or their
 // full-screen live view / vacuum panel does not open and close,
-// or if the camera card's page mode does not stream just the camera on screen, swipe (wrapping) between cameras
-// while ignoring vertical drags, unmute, pick from its grid, or go home.
+// or if the camera card's page mode does not stream just the camera on screen, swipe between cameras while ignoring
+// vertical drags, hide a swipe between cameras from Swipe Navigation or keep a swipe past the first / last camera from it, unmute, pick from its grid, or go home.
 // or if the Now Playing card does not tick its progress, control its one player, open its volume slider or go back home.
 // or if the digital clock, the calendar's day and list layouts, the weather page or a tile's navigate tap go wrong
 // (wrong text, glass where the text should sit on the wallpaper, a free/busy event without "Busy", no navigation),
@@ -778,7 +778,8 @@ result.cards = await cardsPage.evaluate(async () => {
   out.movedCalendar = text(movedCal);
   out.vacuum = text(vacuum);
   out.media = text(media);
-  // camera page: only the camera on screen streams; swipes (pointer drags) step and wrap, a vertical drag does not
+  // camera page: only the camera on screen streams; swipes (pointer drags) step, a vertical drag does not; past the
+  // first / last camera a swipe stays put and its touchend reaches Swipe Navigation (a capture listener on ha-app-layout)
   const pg = camPage.shadowRoot.querySelector("homeview-camera-page");
   const pq = (s) => pg.shadowRoot.querySelector(s);
   const pageNow = () => ({ name: pq(".pill-name")?.textContent, live: [...pg.shadowRoot.querySelectorAll("img.live")].map((i) => i.getAttribute("src")), mute: pq(".mute").getAttribute("aria-label"), dots: pg.shadowRoot.querySelectorAll(".dots i").length });
@@ -788,7 +789,13 @@ result.cards = await cardsPage.evaluate(async () => {
     ev("pointerdown", 500, 240);
     for (let i = 1; i <= 5; i++) ev("pointermove", 500 + (dx * i) / 5, 240 + (dy * i) / 5);
     ev("pointerup", 500 + dx, 240 + dy);
+    let reached = false;
+    const seen = () => (reached = true);
+    document.addEventListener("touchend", seen, true);
+    st.dispatchEvent(new Event("touchend", { bubbles: true, composed: true }));
+    document.removeEventListener("touchend", seen, true);
     await wait(700);
+    return reached;
   };
   // below the fold it streams nothing; scrolled into view, the camera on screen streams
   out.camPage = { hidden: pageNow() };
@@ -798,17 +805,21 @@ result.cards = await cardsPage.evaluate(async () => {
   const pr = camPage.getBoundingClientRect();
   out.camPage.size = [pr.width, pr.height];
   out.camPage.frameTop = pg.shadowRoot.querySelectorAll(".cam .frame")[1]?.style.top; // [-1, 0, 1]: the one on screen
-  await drag(-300, 0);
+  out.camPage.leftReached = await drag(-300, 0);
   out.camPage.left = pageNow();
   out.camPage.offlineHint = pq(".empty")?.textContent.trim();
   await drag(0, 200);
   out.camPage.vertical = pageNow();
+  const snapOf = (cam) => cam?.querySelector(".snap")?.getAttribute("src");
+  const slidIn = snapOf(pg.shadowRoot.querySelector(".cam")); // the one before it, waiting on the left
   await drag(300, 0);
-  const slotSnap = (i) => pg.shadowRoot.querySelectorAll(".cam")[i]?.querySelector(".snap")?.getAttribute("src");
-  const slidIn = slotSnap(0);
-  await drag(300, 0);
-  out.camPage.wrapped = pageNow();
-  out.camPage.landedSnap = [slidIn, slotSnap(1)];
+  out.camPage.landedSnap = [slidIn, snapOf(pg.shadowRoot.querySelector('.cam[aria-hidden="false"]'))];
+  out.camPage.firstReached = await drag(300, 0);
+  out.camPage.first2 = { ...pageNow(), cams: pg.shadowRoot.querySelectorAll(".cam").length };
+  await drag(-300, 0);
+  await drag(-300, 0);
+  out.camPage.lastReached = await drag(-300, 0);
+  out.camPage.last = pageNow();
   pq(".mute").click();
   await wait(50);
   out.camPage.unmuted = pageNow();
@@ -1165,7 +1176,11 @@ if (cp.first.name !== "Front" || !doorLive(cp.first) || cp.first.mute !== "Unmut
 if (cp.frameTop !== "-7%") fail.push(`camera page: crop_top 7 gives frame top ${cp.frameTop}`);
 if (cp.left.name !== "Gone" || cp.left.live.length || !/Offline/.test(cp.offlineHint ?? "")) fail.push(`camera page: a swipe left shows ${JSON.stringify(cp.left)} / "${cp.offlineHint}", expected the offline camera, no stream`);
 if (cp.vertical.name !== "Gone") fail.push(`camera page: a vertical drag changed the camera to ${cp.vertical.name}`);
-if (cp.wrapped.name !== "Back" || !doorLive(cp.wrapped)) fail.push(`camera page: two swipes right from the second camera show ${JSON.stringify(cp.wrapped)}, expected to wrap to the last (Back) with its stream`);
+if (cp.leftReached) fail.push("camera page: Swipe Navigation saw the end of a swipe between cameras, so it would change the view too");
+if (cp.first2.name !== "Front" || cp.first2.cams !== 2) fail.push(`camera page: a swipe right on the first camera shows ${cp.first2.name} with ${cp.first2.cams} cameras in the strip, expected Front and no wrapped-in last camera`);
+if (!cp.firstReached) fail.push("camera page: a swipe right on the first camera never reached Swipe Navigation, so it cannot go to the previous view");
+if (cp.last.name !== "Back" || !doorLive(cp.last)) fail.push(`camera page: a swipe left on the last camera shows ${JSON.stringify(cp.last)}, expected to stay on Back with its stream`);
+if (!cp.lastReached) fail.push("camera page: a swipe left on the last camera never reached Swipe Navigation, so it cannot go to the next view");
 if (!cp.landedSnap[0] || cp.landedSnap[0] !== cp.landedSnap[1]) fail.push(`camera page: the camera that slid in showed ${cp.landedSnap[0]} but landed with ${cp.landedSnap[1]}, a new snapshot the old picture shows through until it loads`);
 if (cp.unmuted.mute !== "Mute") fail.push("camera page: the speaker button did not unmute");
 if (!cp.tileTops.length || cp.tileTops.some((t) => t !== "-7%")) fail.push(`camera page: picker tiles' tops are ${cp.tileTops.join(", ")}, expected the card's crop_top 7 (-7%) on each`);
@@ -1215,4 +1230,4 @@ if (fail.length) {
   console.error(`WebKit smoke FAILED:\n- ${fail.join("\n- ")}`);
   process.exit(1);
 }
-console.log("WebKit smoke passed: 5 cards defined and rendered, weather / up next / camera / vacuum / media tile / now playing show their data and make the right calls, camera live view and vacuum panel open and close, camera page streams one camera, swipes, wraps, unmutes, picks and goes home, digital clock / day and list calendars / weather page / tile navigate right, music page opens on play and goes home after a pause, voice overlay follows the satellite across a swipe, lingers after a reply and reads the transcript only for admins, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly, photo frame recovers from lost answers, swipes and opens / closes its full-screen slideshow");
+console.log("WebKit smoke passed: 5 cards defined and rendered, weather / up next / camera / vacuum / media tile / now playing show their data and make the right calls, camera live view and vacuum panel open and close, camera page streams one camera, swipes, leaves its ends to Swipe Navigation, unmutes, picks and goes home, digital clock / day and list calendars / weather page / tile navigate right, music page opens on play and goes home after a pause, voice overlay follows the satellite across a swipe, lingers after a reply and reads the transcript only for admins, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly, photo frame recovers from lost answers, swipes and opens / closes its full-screen slideshow");

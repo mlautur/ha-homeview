@@ -543,8 +543,11 @@ export function cameraPages(entities: unknown): CameraPage[] {
   });
 }
 
-/** index i on a ring of n: the camera page wraps from the last camera to the first */
-export const wrap = (i: number, n: number): number => (n ? ((i % n) + n) % n : 0);
+/**
+ * The camera a swipe on the camera page moves to from camera `cur` of `n` (dir 1: the next one), or
+ * null past the first or last camera: that swipe is not the page's, it leaves for another view.
+ */
+export const cameraStep = (cur: number, dir: 1 | -1, n: number): number | null => (cur + dir >= 0 && cur + dir < n ? cur + dir : null);
 
 /** columns of the camera page's picker: two for up to four cameras, three past that (three in a row for three) */
 export const pickerColumns = (n: number): number => (n <= 2 ? Math.max(1, n) : n === 4 ? 2 : 3);
