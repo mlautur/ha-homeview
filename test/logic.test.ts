@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  clampStep, defaultSide, fromFormList, musicStep, type MusicWatch, handAngles, isActive, listImages, mediaFolders, nowIn, phaseAfter, satellitePhase, setpoints, shuffled, tapService, toFormList, voiceError, within, gestureOf, ShownHistory,
+  clampStep, defaultSide, fromFormList, musicStep, type MusicWatch, newestRun, overlayLine, runText, voiceOverlayStep, type VoiceWatch, handAngles, isActive, listImages, mediaFolders, nowIn, phaseAfter, satellitePhase, setpoints, shuffled, tapService, toFormList, voiceError, within, gestureOf, ShownHistory,
 } from "../src/logic.ts";
 
 const climate = (attributes: Record<string, unknown>, state = "heat") => ({ entity_id: "climate.x", state, attributes });
@@ -432,4 +432,69 @@ test("music page: goes home after a quiet spell on the music page", () => {
   assert.deepEqual(musicStep(w, "idle", true, 200000, 60000), { wakeIn: 60000 });
   // no home path / 0: never goes back
   assert.deepEqual(musicStep({ state: "idle" }, "idle", true, 0, 0), {});
+});
+
+test("voice overlay: shows while the satellite is busy, lingers after a reply", () => {
+  const w: VoiceWatch = {};
+  assert.deepEqual(voiceOverlayStep(w, "idle", false, 0, 2000), {});
+  // the wake word: listening, then thinking, then responding
+  assert.deepEqual(voiceOverlayStep(w, "listening", false, 1, 2000), { show: "listening" });
+  assert.deepEqual(voiceOverlayStep(w, "processing", false, 2, 2000), { show: "thinking" });
+  assert.deepEqual(voiceOverlayStep(w, "responding", false, 3, 2000), { show: "responding" });
+  // back at idle after a reply: stays 2 s, counted from the first idle look
+  assert.deepEqual(voiceOverlayStep(w, "idle", false, 1000, 2000), { show: "responding", hideIn: 2000 });
+  assert.deepEqual(voiceOverlayStep(w, "idle", false, 2500, 2000), { show: "responding", hideIn: 500 });
+  assert.deepEqual(voiceOverlayStep(w, "idle", false, 3000, 2000), {});
+  assert.deepEqual(voiceOverlayStep(w, "idle", false, 3001, 2000), {});
+});
+
+test("voice overlay: hides at once without a reply, never for a lost satellite or while editing", () => {
+  const w: VoiceWatch = {};
+  // a wake word with no speech: straight back to idle
+  voiceOverlayStep(w, "listening", false, 0, 2000);
+  assert.deepEqual(voiceOverlayStep(w, "idle", false, 1, 2000), {});
+  // a page load mid-run shows it
+  assert.deepEqual(voiceOverlayStep({}, "processing", false, 0, 2000), { show: "thinking" });
+  for (const s of ["unavailable", "unknown", undefined]) assert.deepEqual(voiceOverlayStep({}, s, false, 0, 2000), {});
+  // unavailable mid-reply: gone, no linger
+  voiceOverlayStep(w, "responding", false, 2, 2000);
+  assert.deepEqual(voiceOverlayStep(w, "unavailable", false, 3, 2000), {});
+  assert.deepEqual(voiceOverlayStep(w, "idle", false, 4, 2000), {});
+  // the dashboard is being edited
+  assert.deepEqual(voiceOverlayStep({}, "listening", true, 0, 2000), {});
+  voiceOverlayStep(w, "responding", false, 5, 2000);
+  assert.deepEqual(voiceOverlayStep(w, "responding", true, 6, 2000), {});
+});
+
+test("voice overlay: a new wake word during the linger is a new run", () => {
+  const w: VoiceWatch = {};
+  voiceOverlayStep(w, "responding", false, 0, 2000);
+  voiceOverlayStep(w, "idle", false, 100, 2000);
+  assert.deepEqual(voiceOverlayStep(w, "listening", false, 200, 2000), { show: "listening" });
+  // no reply this time: hides at once
+  assert.deepEqual(voiceOverlayStep(w, "idle", false, 300, 2000), {});
+});
+
+test("voice overlay: transcript from pipeline debug events", () => {
+  const events = [
+    { type: "run-start", data: {} },
+    { type: "stt-end", data: { stt_output: { text: "Turn off the lights" } } },
+    { type: "intent-end", data: { intent_output: { response: { speech: { plain: { speech: "Turned off the lights" } } } } } },
+  ];
+  assert.deepEqual(runText(events), { heard: "Turn off the lights", reply: "Turned off the lights" });
+  assert.deepEqual(runText(events.slice(0, 2)), { heard: "Turn off the lights", reply: undefined });
+  assert.deepEqual(runText([{ type: "stt-end", data: { stt_output: { text: "" } } }]), { heard: undefined, reply: undefined });
+  const runs = [
+    { pipeline_run_id: "a", timestamp: "2026-11-21T10:00:00+00:00" },
+    { pipeline_run_id: "c", timestamp: "2026-11-21T10:05:01+00:00" },
+    { pipeline_run_id: "b", timestamp: "2026-11-21T10:04:00+00:00" },
+  ];
+  assert.equal(newestRun(runs, "2026-11-21T10:05:00+00:00")?.pipeline_run_id, "c");
+  // started just before the satellite turned to listening: still this run
+  assert.equal(newestRun(runs.slice(0, 1), "2026-11-21T10:00:05+00:00")?.pipeline_run_id, "a");
+  // only an old run: not this one
+  assert.equal(newestRun(runs.slice(0, 2).filter((r) => r.pipeline_run_id === "a"), "2026-11-21T10:05:00+00:00"), undefined);
+  assert.equal(overlayLine("listening", {}), "Listening");
+  assert.equal(overlayLine("thinking", { heard: "Hi" }), "“Hi”");
+  assert.equal(overlayLine("responding", { heard: "Hi", reply: "Hello" }), "Hello");
 });

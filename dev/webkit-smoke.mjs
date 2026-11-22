@@ -21,7 +21,9 @@
 // while ignoring vertical drags, unmute, pick from its grid, or go home.
 // or if the Now Playing card does not tick its progress, control its one player, open its volume slider or go back home.
 // or if the digital clock, the calendar's day and list layouts, the weather page or a tile's navigate tap go wrong
-// (wrong text, glass where the text should sit on the wallpaper, a free/busy event without "Busy", no navigation).
+// (wrong text, glass where the text should sit on the wallpaper, a free/busy event without "Busy", no navigation),
+// or if the voice overlay does not follow its satellite (shown, linger, hide, never unavailable or in edit mode), takes touches
+// or history, drops out on a swipe mid-reply, or reads the transcript without transcript: true or as a non-admin.
 // One-time setup: npx playwright-core install webkit. Run: npm run test:webkit
 import { readFileSync } from "node:fs";
 import http from "node:http";
@@ -902,6 +904,121 @@ result.cards = await cardsPage.evaluate(async () => {
 await cardsPage.waitForTimeout(2500);
 result.cards.snapshotsAfter = snapshots;
 result.cards.broken = await cardsPage.evaluate(() => ({ text: brokenCamera.shadowRoot.querySelector("ha-card").textContent.replace(/\s+/g, " ").trim(), img: !!brokenCamera.shadowRoot.querySelector("img") }));
+// voice overlay: cards carrying the same voice_overlay share one overlay that follows the satellite on any page
+const voicePage = await browser.newPage({ viewport: { width: 960, height: 480 } });
+voicePage.on("pageerror", (e) => errors.push(e.message));
+await voicePage.route("https://homeview.test/", (r) => r.fulfill({ contentType: "text/html", body: "<!doctype html><body style='margin:0;background:#888'></body>" }));
+await voicePage.goto("https://homeview.test/");
+await voicePage.addScriptTag({
+  content: `customElements.define("ha-card", class extends HTMLElement {
+    constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = "<style>:host{display:block}</style><slot></slot>"; }
+  });`,
+});
+await voicePage.addScriptTag({ type: "module", content: bundle });
+result.overlay = await voicePage.evaluate(async () => {
+  await customElements.whenDefined("homeview-clock-card");
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const SAT = "assist_satellite.echo";
+  const ws = [];
+  const t0 = new Date().toISOString();
+  // the run's debug log so far: the heard text once it is thinking, the reply once it responds
+  let logged = [];
+  const hassWith = (state, admin = true) => ({
+    states: { [SAT]: { entity_id: SAT, state, attributes: {}, last_changed: t0 } },
+    entities: {}, devices: {}, areas: {}, config: { unit_system: { temperature: "°F" }, time_zone: "UTC" }, language: "en-US",
+    user: { is_admin: admin },
+    callService: async () => {},
+    callWS: async (m) => {
+      ws.push(m.type);
+      if (!admin && m.type.includes("pipeline_debug")) throw { code: "unauthorized", message: "Unauthorized" };
+      if (m.type === "assist_pipeline/pipeline/list") return { pipelines: [{ id: "p1" }], preferred_pipeline: "p1" };
+      if (m.type === "assist_pipeline/pipeline_debug/list") return { pipeline_runs: [{ pipeline_run_id: "old", timestamp: "2020-01-01T00:00:00+00:00" }, { pipeline_run_id: "now", timestamp: t0 }] };
+      if (m.type === "assist_pipeline/pipeline_debug/get")
+        return { events: m.pipeline_run_id !== "now" ? [{ type: "stt-end", data: { stt_output: { text: "stale" } } }] : logged };
+      return {};
+    },
+    connection: { subscribeMessage: async () => () => {} },
+    hassUrl: (p) => p,
+  });
+  const make = async (config, state, admin) => {
+    const el = document.createElement("homeview-clock-card");
+    el.setConfig({ type: "custom:homeview-clock-card", face: "digital", ...config });
+    el.hass = hassWith(state, admin);
+    const cell = document.body.appendChild(document.createElement("div"));
+    cell.style.cssText = "width:200px;height:100px";
+    cell.appendChild(el);
+    await el.updateComplete;
+    return el;
+  };
+  const setAll = async (els, state, admin) => { for (const el of els) el.hass = hassWith(state, admin); await Promise.all(els.map((el) => el.updateComplete)); await wait(30); };
+  const overlays = () => document.querySelectorAll("homeview-voice-overlay");
+  const look = () => {
+    const o = overlays()[0];
+    if (!o) return { count: 0 };
+    const pill = o.shadowRoot.querySelector(".pill");
+    const cs = getComputedStyle(o);
+    return { count: overlays().length, shown: o.hasAttribute("shown"), line: o.shadowRoot.querySelector(".txt")?.textContent ?? "", live: pill?.getAttribute("aria-live"), pointer: cs.pointerEvents, z: cs.zIndex, position: cs.position };
+  };
+  const out = {};
+  const opt = { satellite: SAT };
+  const historyBefore = history.length;
+  const home = [await make({ voice_overlay: opt }, "idle"), await make({ voice_overlay: opt }, "idle")];
+  out.idle = look();
+  await setAll(home, "listening");
+  out.listening = look();
+  out.history = history.length - historyBefore;
+  out.under = document.elementFromPoint(480, 240)?.localName;
+  await setAll(home, "processing");
+  out.thinking = look();
+  await setAll(home, "responding");
+  out.responding = look();
+  // a swipe: this view's cards leave, the next view's card arrives a moment later, mid-reply
+  home.forEach((el) => el.parentElement.remove());
+  await wait(200);
+  const next = [await make({ voice_overlay: opt }, "responding")];
+  out.swiped = look();
+  await setAll(next, "idle");
+  out.linger = look();
+  await wait(2300);
+  out.after = look();
+  // a wake word with no speech: gone as soon as it is idle
+  await setAll(next, "listening");
+  await setAll(next, "idle");
+  out.noSpeech = look();
+  await setAll(next, "unavailable");
+  out.unavailable = look();
+  out.noTranscriptWs = ws.length;
+  // the dashboard being edited
+  history.replaceState(null, "", "?edit=1");
+  await setAll(next, "listening");
+  out.editing = look();
+  history.replaceState(null, "", location.pathname);
+  await setAll(next, "idle");
+  next.forEach((el) => el.parentElement.remove());
+  await wait(2100);
+  out.forgotten = overlays().length;
+  // transcript: an admin sees what was heard and the reply, from this run (not an older one)
+  const tr = [await make({ voice_overlay: { satellite: SAT, transcript: true } }, "listening")];
+  logged = [{ type: "stt-end", data: { stt_output: { text: "Turn off the lights" } } }];
+  await setAll(tr, "processing");
+  await wait(50);
+  out.heard = look().line;
+  logged = [...logged, { type: "intent-end", data: { intent_output: { response: { speech: { plain: { speech: "Lights off" } } } } } }];
+  await setAll(tr, "responding");
+  await wait(50);
+  out.reply = look().line;
+  await setAll(tr, "idle");
+  tr.forEach((el) => el.parentElement.remove());
+  await wait(2100);
+  // not an admin: the status words, and no debug log reads
+  ws.length = 0;
+  const user = [await make({ voice_overlay: { satellite: SAT, transcript: true } }, "listening", false)];
+  await setAll(user, "processing", false);
+  await wait(50);
+  out.userLine = look().line;
+  out.userWs = [...ws];
+  return out;
+});
 await browser.close();
 tts.closeAllConnections();
 tts.close();
@@ -1078,9 +1195,24 @@ if (c.navigate.path !== "/echo-show/music" || c.navigate.events !== 1) fail.push
 if (c.musicOpen.path !== "/echo-show/music" || c.musicOpen.events !== 1) fail.push(`music page: the player starting gave ${JSON.stringify(c.musicOpen)}, expected /echo-show/music and one location-changed from two cards`);
 if (c.musicStays !== "/echo-show/music" || c.musicBack !== "/echo-show/home") fail.push(`music page: paused on the music page it was at ${c.musicStays} after 0.4 s and ${c.musicBack} after 1.4 s, expected to stay, then go home after return_after 1 s`);
 if (c.musicCached.path !== "/echo-show/cameras" || c.musicCached.events !== 0) fail.push(`music page: a reconnected cached card gave ${JSON.stringify(c.musicCached)}, expected to stay on /echo-show/cameras with no location-changed`);
+const ov = result.overlay;
+const shownAs = (o, line) => o.count === 1 && o.shown && o.line === line;
+if (ov.idle.count && ov.idle.shown) fail.push(`voice overlay: shown while the satellite is idle (${JSON.stringify(ov.idle)})`);
+if (!shownAs(ov.listening, "Listening") || ov.listening.live !== "polite" || ov.listening.pointer !== "none" || ov.listening.position !== "fixed" || Number(ov.listening.z) < 2147483000)
+  fail.push(`voice overlay: on listening ${JSON.stringify(ov.listening)}, expected one fixed, untouchable overlay above HomeView's pages saying Listening in a polite live region`);
+if (ov.history !== 0) fail.push(`voice overlay: added ${ov.history} history entries, expected none`);
+if (ov.under === "homeview-voice-overlay") fail.push("voice overlay: takes touches meant for the page under it");
+if (!shownAs(ov.thinking, "Thinking") || !shownAs(ov.responding, "Responding")) fail.push(`voice overlay: thinking ${JSON.stringify(ov.thinking)}, responding ${JSON.stringify(ov.responding)}`);
+if (!shownAs(ov.swiped, "Responding")) fail.push(`voice overlay: a swipe mid-reply gave ${JSON.stringify(ov.swiped)}, expected the same overlay still up`);
+if (!shownAs(ov.linger, "Responding") || ov.after.shown) fail.push(`voice overlay: after the reply ${JSON.stringify(ov.linger)} then ${JSON.stringify(ov.after)}, expected it to stay about 2 s, then hide`);
+if (ov.noSpeech.shown || ov.unavailable.shown || ov.editing.shown) fail.push(`voice overlay: shown for a wake word with no speech (${ov.noSpeech.shown}), an unavailable satellite (${ov.unavailable.shown}) or while editing (${ov.editing.shown})`);
+if (ov.noTranscriptWs !== 0) fail.push(`voice overlay: read Assist's debug log ${ov.noTranscriptWs} times without transcript: true`);
+if (ov.forgotten !== 0) fail.push(`voice overlay: ${ov.forgotten} overlay(s) left after every card carrying it left the page`);
+if (ov.heard !== "“Turn off the lights”" || ov.reply !== "Lights off") fail.push(`voice overlay: with transcript an admin saw "${ov.heard}" then "${ov.reply}", expected the heard text then the reply`);
+if (ov.userLine !== "Thinking" || ov.userWs.some((t) => t.includes("pipeline_debug"))) fail.push(`voice overlay: a non-admin saw "${ov.userLine}" after ${ov.userWs.join(", ")}, expected Thinking and no debug log reads`);
 console.log(JSON.stringify(c));
 if (fail.length) {
   console.error(`WebKit smoke FAILED:\n- ${fail.join("\n- ")}`);
   process.exit(1);
 }
-console.log("WebKit smoke passed: 5 cards defined and rendered, weather / up next / camera / vacuum / media tile / now playing show their data and make the right calls, camera live view and vacuum panel open and close, camera page streams one camera, swipes, wraps, unmutes, picks and goes home, digital clock / day and list calendars / weather page / tile navigate right, music page opens on play and goes home after a pause, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly, photo frame recovers from lost answers, swipes and opens / closes its full-screen slideshow");
+console.log("WebKit smoke passed: 5 cards defined and rendered, weather / up next / camera / vacuum / media tile / now playing show their data and make the right calls, camera live view and vacuum panel open and close, camera page streams one camera, swipes, wraps, unmutes, picks and goes home, digital clock / day and list calendars / weather page / tile navigate right, music page opens on play and goes home after a pause, voice overlay follows the satellite across a swipe, lingers after a reply and reads the transcript only for admins, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly, photo frame recovers from lost answers, swipes and opens / closes its full-screen slideshow");

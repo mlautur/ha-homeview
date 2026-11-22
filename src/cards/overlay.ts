@@ -17,8 +17,8 @@ const HISTORY_KEY = "homeviewOverlay";
 /** how long the overlay takes to fade out; its content is removed after it */
 export const CLOSE_MS = 320;
 
-/** where overlays are mounted: Home Assistant's app root, or the page outside Home Assistant */
-export function openOverlay(el: HomeViewOverlay): void {
+/** where overlays (and the voice overlay) are mounted: Home Assistant's app root, or the page outside Home Assistant */
+export function openOverlay(el: HTMLElement): void {
   (document.querySelector("home-assistant")?.shadowRoot ?? document.body).appendChild(el);
 }
 
