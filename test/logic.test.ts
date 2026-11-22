@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  clampStep, defaultSide, fromFormList, handAngles, isActive, listImages, mediaFolders, nowIn, phaseAfter, satellitePhase, setpoints, shuffled, tapService, toFormList, voiceError, within, gestureOf, ShownHistory,
+  clampStep, defaultSide, fromFormList, musicStep, type MusicWatch, handAngles, isActive, listImages, mediaFolders, nowIn, phaseAfter, satellitePhase, setpoints, shuffled, tapService, toFormList, voiceError, within, gestureOf, ShownHistory,
 } from "../src/logic.ts";
 
 const climate = (attributes: Record<string, unknown>, state = "heat") => ({ entity_id: "climate.x", state, attributes });
@@ -398,4 +398,38 @@ test("now playing: track times and the repeat cycle", () => {
   assert.equal(nextRepeat("all"), "one");
   assert.equal(nextRepeat("one"), "off");
   assert.equal(nextRepeat(undefined), "all");
+});
+
+test("music page: opens on a real start only", () => {
+  const w: MusicWatch = {};
+  // the first look is a page load: already playing does not open it
+  assert.deepEqual(musicStep(w, "playing", false, 0, 60000), {});
+  assert.deepEqual(musicStep(w, "idle", false, 1, 60000), {});
+  assert.deepEqual(musicStep(w, "playing", false, 2, 60000), { go: "music" });
+  // still playing on later looks: no second jump (swiped away while playing stays away)
+  assert.deepEqual(musicStep(w, "playing", false, 3, 60000), {});
+  // paused -> playing from another page opens it too (voice "resume")
+  musicStep(w, "paused", false, 4, 60000);
+  assert.deepEqual(musicStep(w, "playing", false, 5, 60000), { go: "music" });
+  // play pressed on the music page itself: already there
+  musicStep(w, "paused", true, 6, 60000);
+  assert.deepEqual(musicStep(w, "playing", true, 7, 60000), {});
+  // a reconnect is not a start
+  musicStep(w, "unavailable", false, 8, 60000);
+  assert.deepEqual(musicStep(w, "playing", false, 9, 60000), {});
+});
+
+test("music page: goes home after a quiet spell on the music page", () => {
+  const w: MusicWatch = { state: "playing" };
+  assert.deepEqual(musicStep(w, "paused", true, 1000, 60000), { wakeIn: 60000 });
+  assert.deepEqual(musicStep(w, "paused", true, 31000, 60000), { wakeIn: 30000 });
+  assert.deepEqual(musicStep(w, "paused", true, 61000, 60000), { go: "home" });
+  // playing again resets the count
+  musicStep(w, "playing", true, 62000, 60000);
+  assert.deepEqual(musicStep(w, "idle", true, 70000, 60000), { wakeIn: 60000 });
+  // swiped away: left alone, and coming back starts a fresh count
+  assert.deepEqual(musicStep(w, "idle", false, 80000, 60000), {});
+  assert.deepEqual(musicStep(w, "idle", true, 200000, 60000), { wakeIn: 60000 });
+  // no home path / 0: never goes back
+  assert.deepEqual(musicStep({ state: "idle" }, "idle", true, 0, 0), {});
 });
