@@ -22,6 +22,8 @@ export interface PhotoConfig extends BaseConfig {
   shuffle?: boolean;
   recursive?: boolean;
   fit?: "cover" | "contain";
+  /** false: horizontal swipes are left to the page (Swipe Navigation); taps still open the slideshow */
+  swipe?: boolean;
 }
 
 const RELIST_MS = 30 * 60 * 1000;
@@ -69,6 +71,7 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> implements Slid
     { name: "interval", label: "Seconds per picture", selector: { number: { min: 5, max: 3600, step: 1, mode: "box", unit_of_measurement: "s" } } },
     { name: "shuffle", selector: { boolean: {} } },
     { name: "recursive", label: "Include subfolders", selector: { boolean: {} } },
+    { name: "swipe", label: "Swipe for the next picture", selector: { boolean: {} } },
     { name: "fit", selector: { select: { mode: "dropdown", options: [{ value: "cover", label: "Fill" }, { value: "contain", label: "Fit whole picture" }] } } },
   ];
 
@@ -101,7 +104,7 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> implements Slid
     super.firstUpdated(changed);
     const card = this.renderRoot.querySelector<HTMLElement>("ha-card");
     if (!card || this.untrack) return;
-    this.untrack = trackGestures(card, { move: (dx) => this.dragTo(dx), end: (g) => (g === "tap" ? this.openSlideshow() : this.dragEnd(g)) }, false);
+    this.untrack = trackGestures(card, { move: (dx) => this._config?.swipe !== false && this.dragTo(dx), end: (g) => (g === "tap" ? this.openSlideshow() : this.dragEnd(g)) }, false);
   }
 
   protected updated(changed: PropertyValues): void {
@@ -347,8 +350,9 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> implements Slid
     const shown = !!this._stage.urls[this._stage.front];
     // "swiper": Swipe Navigation (a popular add-on that swipes between dashboard views) leaves
     // drags on that class alone, so swiping the frame changes the picture, not the view
+    const swipe = this._config.swipe !== false;
     return html`<ha-card
-      class="photo swiper ${this.square ? "square" : ""} ${shown ? "shown" : ""}"
+      class="photo ${swipe ? "swiper" : ""} ${this.square ? "square" : ""} ${shown ? "shown" : ""}"
       role=${shown ? "button" : nothing}
       tabindex=${shown ? "0" : nothing}
       aria-label=${shown ? "Photo frame: open the full-screen slideshow" : nothing}
@@ -375,11 +379,13 @@ export class HomeViewPhotoCard extends HomeViewCard<PhotoConfig> implements Slid
         background: rgb(0 0 0 / 0.25);
         box-shadow: 0 calc(var(--hv-ref, 200px) * 0.03) calc(var(--hv-ref, 200px) * 0.09) rgb(40 30 20 / 0.18);
         --hv-gap: 12px;
-        /* horizontal drags are ours (swipe), vertical ones still scroll the page */
-        touch-action: pan-y;
         user-select: none;
         -webkit-user-select: none;
         -webkit-tap-highlight-color: transparent;
+      }
+      /* horizontal drags are ours (swipe), vertical ones still scroll the page */
+      ha-card.photo.swiper {
+        touch-action: pan-y;
       }
       ha-card.photo.shown {
         cursor: pointer;
