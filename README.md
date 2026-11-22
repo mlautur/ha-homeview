@@ -293,6 +293,23 @@ music_page:
 - Nothing happens while the dashboard is being edited.
 - In the visual editor it is the *Open the music page when a player starts* group.
 
+#### Show the voice assistant over every page
+
+Any HomeView card can carry a `voice_overlay` option. While the voice satellite listens (its wake word), thinks or responds, a warm light runs around the edge of the screen and a frost pill at the bottom centre says *Listening*, *Thinking* or *Responding*, on whichever page is showing, full-screen pages included. It fades out when the satellite is back to idle, 2 seconds after a reply so it can be read.
+
+```yaml
+voice_overlay:
+  satellite: assist_satellite.echo_show   # the satellite to follow
+  transcript: true                        # optional: show what was heard, then the reply (admins only)
+```
+
+- As with `music_page`, put the same option on one card in **every** view (`voice_overlay: &voice_overlay ...`, then `voice_overlay: *voice_overlay`). It stays up through a swipe to another view.
+- It never takes a touch or a history entry: the page under it keeps working.
+- The light's motion is drawn per state, not from the microphone: on a device such as an Echo Show, the microphone belongs to its own voice app, not to the dashboard.
+- `transcript` reads Assist's debug log, which only Home Assistant admins may read. For any other user, or if it can't be read, the pill shows the status words. Off by default.
+- Nothing shows for an unavailable satellite or while the dashboard is being edited.
+- In the visual editor it is the *Show the voice assistant over every page* group.
+
 ### Swipe Navigation
 
 [Swipe Navigation](https://github.com/zanna-37/hass-swipe-navigation) swipes between dashboard views, for example from the panel to a view of cameras. It works with HomeView. Swipes on the photo frame still change the picture, and swipes on a camera page change the camera; neither changes the view.
@@ -305,7 +322,7 @@ Browsers only allow the microphone on secure pages. On a plain `http://192.168.x
 2. **A reverse proxy with a certificate** in front of Home Assistant (Caddy, NGINX Proxy Manager, Traefik), reached by a local DNS name.
 3. **Home Assistant's own TLS**: `http: ssl_certificate` / `ssl_key` in `configuration.yaml`.
 4. **Chrome on the tablet only**: `chrome://flags/#unsafely-treat-insecure-origin-as-secure`, adding your Home Assistant URL. This does not apply to Android WebView apps such as the Home Assistant companion app or Fully Kiosk.
-5. **A voice satellite** (Home Assistant Voice, ESPHome) handles the audio itself. Point the card's `satellite:` option at it to show its listening, thinking and responding states on the panel.
+5. **A voice satellite** (Home Assistant Voice, ESPHome) handles the audio itself. Point the card's `satellite:` option at it to show its listening, thinking and responding states on the panel, or use [`voice_overlay`](#show-the-voice-assistant-over-every-page) to show them over every page.
 
 Typed requests work without HTTPS.
 
@@ -325,9 +342,10 @@ For the full HomeView look:
 ## Bedside screen (Echo Show)
 
 [`examples/echo-show.yaml`](examples/echo-show.yaml) turns a 2:1 screen such as an Echo Show 5 (960x480) into a bedside clock with swipeable pages, laid out like a quadrant grid: the time top left on the wallpaper, and the other quadrants filled with cards.
-- **Home**: the digital clock and the calendar's day panel along the top, Mavis (the voice card mirroring the Echo's own satellite) and the weather along the bottom.
+- **Home**: the digital clock over the calendar's day panel on the left, and the photo slideshow filling the right half.
 - **Controls**: the clock, a Now Playing tile that opens the Music page, the front door lock, the weather, the vacuum and one tile for a group of curtains.
 - **Music**, **Cameras**, **Weather** and **Calendar**: full-screen `panel` views. Music opens by itself when the Echo starts playing, and goes back Home a minute after it stops there ([`music_page`](#open-the-music-page-when-something-plays)).
+- **Voice**: on every page, the screen's edge lights up while the Echo listens, thinks and responds ([`voice_overlay`](#show-the-voice-assistant-over-every-page)).
 
 Its Sections views use the `homeview-echo` theme from [`examples/echo-show-theme.yaml`](examples/echo-show-theme.yaml): a 4.5vh edge and 4.5vh gaps, and 7.4375vh rows, so a 12x4 card is exactly a quadrant (447.6 x 207.6px at 960x480). It needs a kiosk mode that hides the header, and [Swipe Navigation](#swipe-navigation) for the swipes.
 

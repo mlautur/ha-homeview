@@ -630,3 +630,60 @@ export function musicStep(w: MusicWatch, state: string | undefined, onMusic: boo
   w.quietSince = undefined;
   return { go: "home" };
 }
+
+/** The voice overlay's phases: it is shown only in these */
+export type OverlayPhase = "listening" | "thinking" | "responding";
+
+/** What the voice overlay watcher remembers between looks: the phase on show, whether a reply came, since when idle */
+export interface VoiceWatch {
+  phase?: OverlayPhase;
+  replied?: boolean;
+  idleSince?: number;
+}
+
+/**
+ * One look at the voice satellite (see voice-overlay.ts). Shows the overlay while it listens (the wake word),
+ * thinks or responds, a page load mid-run included. Back at idle it hides at once, or `lingerMs` after a reply so
+ * the reply can be read. Never for an unavailable / unknown satellite, never while the dashboard is edited.
+ * `hideIn`: look again then.
+ */
+export function voiceOverlayStep(w: VoiceWatch, state: string | undefined, editing: boolean, now: number, lingerMs: number): { show?: OverlayPhase; hideIn?: number } {
+  const p = state === "unknown" ? "error" : satellitePhase(state);
+  if (!editing && (p === "listening" || p === "thinking" || p === "responding")) {
+    // a new run: nothing shown, or a reply lingering
+    if (!w.phase || w.idleSince !== undefined) w.replied = false;
+    w.phase = p;
+    w.replied ||= p === "responding";
+    w.idleSince = undefined;
+    return { show: p };
+  }
+  if (p === "idle" && !editing && w.phase && w.replied) {
+    w.idleSince ??= now;
+    const left = w.idleSince + lingerMs - now;
+    if (left > 0) return { show: w.phase, hideIn: left };
+  }
+  w.phase = undefined;
+  w.replied = false;
+  w.idleSince = undefined;
+  return {};
+}
+
+/** what was heard and the reply, from an Assist pipeline run's debug events */
+export function runText(events: PipelineEvent[]): { heard?: string; reply?: string } {
+  const heard = events.find((e) => e.type === "stt-end")?.data?.stt_output?.text;
+  const reply = events.find((e) => e.type === "intent-end")?.data?.intent_output?.response?.speech?.plain?.speech;
+  return { heard: heard || undefined, reply: reply || undefined };
+}
+
+/** the newest pipeline run that started no earlier than `since` - slack (ISO times, the server's clock), or undefined */
+export function newestRun<T extends { timestamp: string }>(runs: T[], since: string | undefined, slackMs = 30000): T | undefined {
+  const from = since ? Date.parse(since) - slackMs : -Infinity;
+  let best: T | undefined;
+  for (const r of runs) if (Date.parse(r.timestamp) >= from && (!best || Date.parse(r.timestamp) > Date.parse(best.timestamp))) best = r;
+  return best;
+}
+
+/** the voice overlay's one line: the reply, else what was heard (quoted), else the status word */
+export function overlayLine(phase: OverlayPhase, text: { heard?: string; reply?: string }): string {
+  return text.reply ?? (text.heard ? `“${text.heard}”` : { listening: "Listening", thinking: "Thinking", responding: "Responding" }[phase]);
+}

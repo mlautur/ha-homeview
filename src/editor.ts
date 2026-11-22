@@ -79,6 +79,19 @@ export const MUSIC_FIELDS: EditorField[] = [
   },
 ];
 
+/** the shared `voice_overlay` option, nested under its own name */
+export const VOICE_FIELDS: EditorField[] = [
+  {
+    name: "voice_overlay",
+    type: "expandable",
+    title: "Show the voice assistant over every page",
+    schema: [
+      { name: "satellite", label: "Voice satellite", helper: "Its listening, thinking and responding light up the screen's edge. Put this option on one card in every view.", selector: { entity: { filter: { domain: "assist_satellite" } } } },
+      { name: "transcript", label: "Show what was heard and the reply", helper: "Reads Assist's debug log, so it needs a Home Assistant admin user. Otherwise only the status shows.", selector: { boolean: {} } },
+    ],
+  },
+];
+
 const labelize = (name: string): string => name.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 
 export class HomeViewCardEditor extends LitElement {
@@ -96,7 +109,7 @@ export class HomeViewCardEditor extends LitElement {
     return html`<ha-form
       .hass=${this.hass}
       .data=${toFormList(this._config, this.listNames())}
-      .schema=${[...this.fields, ...MUSIC_FIELDS, ...GLASS_FIELDS]}
+      .schema=${[...this.fields, ...MUSIC_FIELDS, ...VOICE_FIELDS, ...GLASS_FIELDS]}
       .computeLabel=${(s: EditorField) => s.label ?? labelize(s.name)}
       .computeHelper=${(s: EditorField) => s.helper}
       @value-changed=${this.changed}
@@ -111,9 +124,11 @@ export class HomeViewCardEditor extends LitElement {
     ev.stopPropagation();
     const config: LovelaceCardConfig = fromFormList({ ...ev.detail.value }, this.listNames());
     const blank = (v: unknown): boolean => v === "" || v === undefined || v === null;
-    if (config.music_page && typeof config.music_page === "object") {
-      const m = Object.fromEntries(Object.entries(config.music_page).filter(([, v]) => !blank(v)));
-      config.music_page = Object.keys(m).length ? m : undefined;
+    for (const name of ["music_page", "voice_overlay"]) {
+      const o = config[name];
+      if (!o || typeof o !== "object") continue;
+      const m = Object.fromEntries(Object.entries(o).filter(([, v]) => !blank(v)));
+      config[name] = Object.keys(m).length ? m : undefined;
     }
     for (const [k, v] of Object.entries(config)) if (blank(v)) delete config[k];
     fireEvent(this, "config-changed", { config });

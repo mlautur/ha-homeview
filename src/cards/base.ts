@@ -9,10 +9,13 @@ import { GlassController, type GlassOptions } from "../glass/surface.ts";
 import type { GridOptions, Hass, LovelaceCardConfig } from "../ha.ts";
 import type { EditorField } from "../editor.ts";
 import { musicPage, type MusicPageConfig } from "../music-page.ts";
+import { voiceOverlay, type VoiceOverlayConfig } from "../voice-overlay.ts";
 
 export interface BaseConfig extends LovelaceCardConfig, GlassOptions {
   /** open a music page when a player starts (see music-page.ts) */
   music_page?: MusicPageConfig;
+  /** show a voice satellite's listening, thinking and responding over every page (see voice-overlay.ts) */
+  voice_overlay?: VoiceOverlayConfig;
 }
 
 export const glassStyles = css`
@@ -270,8 +273,11 @@ export abstract class HomeViewCard<C extends BaseConfig = BaseConfig> extends Li
 
   protected updated(changed: PropertyValues): void {
     super.updated(changed);
-    // a card of a view Home Assistant keeps aside (disconnected) must not hold the watcher
-    if (this.isConnected && (changed.has("hass") || changed.has("_config"))) musicPage(this, this._config?.music_page, this.hass);
+    // a card of a view Home Assistant keeps aside (disconnected) must not hold the watchers
+    if (this.isConnected && (changed.has("hass") || changed.has("_config"))) {
+      musicPage(this, this._config?.music_page, this.hass);
+      voiceOverlay(this, this._config?.voice_overlay, this.hass);
+    }
     // a config change between glass and bare swaps the ha-card element: size the new one
     if (this.sizer && this.renderRoot.querySelector("ha-card") !== this.sized) this.observeCard();
   }
@@ -300,12 +306,16 @@ export abstract class HomeViewCard<C extends BaseConfig = BaseConfig> extends Li
     this.sizer?.disconnect();
     this.sizer = undefined;
     musicPage(this, undefined);
+    voiceOverlay(this, undefined);
   }
 
   connectedCallback(): void {
     super.connectedCallback();
     // re-attach the sizer after a move between parents (Sections drag and drop)
     if (this.hasUpdated && !this.sizer) this.observeCard();
-    if (this.hasUpdated) musicPage(this, this._config?.music_page);
+    if (this.hasUpdated) {
+      musicPage(this, this._config?.music_page);
+      voiceOverlay(this, this._config?.voice_overlay);
+    }
   }
 }

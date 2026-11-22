@@ -22,6 +22,8 @@ export interface Hass {
   /** the user's profile settings: time_format is "language" | "system" | "12" | "24" */
   locale?: { language?: string; time_format?: string };
   callService(domain: string, service: string, data?: Record<string, unknown>, target?: Record<string, unknown>): Promise<unknown>;
+  /** the signed-in user */
+  user?: { is_admin: boolean };
   callWS<T>(msg: Record<string, unknown>): Promise<T>;
   connection: HassConnection;
   hassUrl(path?: string): string;
