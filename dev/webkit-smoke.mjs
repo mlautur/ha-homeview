@@ -650,6 +650,8 @@ result.cards = await cardsPage.evaluate(async () => {
       "media_player.room": st("media_player.room", "playing", { media_title: "Song", media_artist: "Band", friendly_name: "Room" }),
       "media_player.echo": st("media_player.echo", "playing", { entity_picture: "/api/media_player_proxy/media_player.echo?token=t", media_title: "Golden Hour", media_artist: "Artist", media_album_name: "Album", media_duration: 209, media_position: 23, media_position_updated_at: new Date().toISOString(), volume_level: 0.42, shuffle: false, repeat: "off", supported_features: 1 | 2 | 4 | 16 | 32 | 16384 | 32768 | 262144, friendly_name: "Echo Show" }),
       "media_player.quiet": st("media_player.quiet", "idle", { friendly_name: "Quiet", supported_features: 1 | 16384 }),
+      // Music Assistant pauses to idle and keeps the track loaded
+      "media_player.held": st("media_player.held", "idle", { entity_picture: "/api/media_player_proxy/media_player.held?token=t", media_title: "Golden Hour", media_artist: "Artist", media_album_name: "Album", supported_features: 1 | 16 | 32 | 16384, friendly_name: "Held" }),
     },
     entities: {
       "vacuum.robot": { device_id: "d1", platform: "roborock" },
@@ -723,6 +725,7 @@ result.cards = await cardsPage.evaluate(async () => {
   autoCell.appendChild(autoPage);
   const np = await make("homeview-media-card", { entity: "media_player.echo", navigation_path: "/echo-show/home" }, 960, 480);
   const npIdle = await make("homeview-media-card", { entity: "media_player.quiet" }, 960, 480);
+  const npHeld = await make("homeview-media-card", { entity: "media_player.held" }, 960, 480);
   const three = ["calendar.family", "calendar.school", "calendar.busy"];
   const dayCal = await make("homeview-calendar-card", { layout: "day", entities: three }, 448, 208);
   const listCal = await make("homeview-calendar-card", { layout: "list", entities: three }, 960, 480);
@@ -890,6 +893,9 @@ result.cards = await cardsPage.evaluate(async () => {
     out.np.navigated = changed && location.pathname === "/echo-show/home";
     const iq = (s) => npIdle.shadowRoot.querySelector(s);
     out.np.idle = { text: text(npIdle), art: !!iq(".art .none"), prog: !!iq(".prog"), close: !!iq(".top"), next: iq("button[aria-label=Next]")?.disabled };
+    const hq = (s) => npHeld.shadowRoot.querySelector(s);
+    out.np.held = { text: text(npHeld), art: !!hq(".art img"), play: !!hq("button[aria-label=Play]"), next: hq("button[aria-label=Next]")?.disabled };
+    hq("button[aria-label=Play]")?.click();
   }
   // camera: a tap opens the live view full screen (no Home Assistant player here: the MJPEG stream); Escape closes it
   camera.shadowRoot.querySelector("ha-card").click();
@@ -1167,6 +1173,7 @@ const want = [
   ["media_player.media_previous_track", "media_player.echo"],
   ["media_player.media_play_pause", "media_player.echo"],
   ["media_player.media_next_track", "media_player.echo"],
+  ["media_player.media_play_pause", "media_player.held"],
   ["media_player.shuffle_set", "media_player.echo", { shuffle: true }],
   ["media_player.repeat_set", "media_player.echo", { repeat: "all" }],
   ["media_player.media_seek", "media_player.echo", { seek_position: 100 }],
@@ -1215,6 +1222,8 @@ if (np.heldDrag !== "120") fail.push(`now playing: a position report mid-drag mo
 if (!np.navigated) fail.push("now playing: the close button did not navigate to its navigation_path");
 if (!/Not playing/.test(np.idle.text) || !/Quiet/.test(np.idle.text) || !np.idle.art || np.idle.prog || np.idle.close || np.idle.next !== true)
   fail.push(`now playing: an idle player shows ${JSON.stringify(np.idle)}, expected Not playing, its name, an empty art frame, no progress, no close button and Next disabled`);
+if (!/Golden Hour/.test(np.held.text) || !/Artist/.test(np.held.text) || /Not playing/.test(np.held.text) || !np.held.art || !np.held.play || np.held.next !== false)
+  fail.push(`now playing: an idle player that keeps its track shows ${JSON.stringify(np.held)}, expected it paused: art, title, artist, Play and Next enabled`);
 if (c.day.head !== "Today" || c.day.titles.join() !== "Now,Holiday,Busy" || !/^Tomorrow · All day$/.test(c.day.when[1] ?? ""))
   fail.push(`calendar day: ${JSON.stringify(c.day)}, expected Today with Now, then Holiday (Tomorrow · All day) and the untitled event as Busy`);
 if (c.list.titles.join() !== "Now,Holiday,Busy,Later" || c.list.rel.join() !== "today,tomorrow,in 2 days,in 3 days" || !c.list.today || c.list.glassy)

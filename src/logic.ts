@@ -314,13 +314,20 @@ export function satellitePhase(state: string | undefined): VoicePhase {
   }
 }
 
+/**
+ * A media player's state as the cards show it. Some players (Music Assistant) go "idle" on pause while keeping
+ * the track loaded, and play resumes it; an idle player that still names a track reads as paused.
+ */
+export const mediaState = (s: HassEntity): string => (s.state === "idle" && s.attributes.media_title ? "paused" : s.state);
+
 /** A media player tile's two lines: what is playing and who by, or the player's name and state. */
 export function mediaLines(s: HassEntity, name: string): { title: string; sub: string } {
   const a = s.attributes;
-  const live = s.state === "playing" || s.state === "paused";
-  if (!live || !a.media_title) return { title: name, sub: live ? capitalize(s.state) : "Not playing" };
+  const state = mediaState(s);
+  const live = state === "playing" || state === "paused";
+  if (!live || !a.media_title) return { title: name, sub: live ? capitalize(state) : "Not playing" };
   const by = a.media_artist || a.media_album_artist || a.app_name || "";
-  return { title: String(a.media_title), sub: s.state === "paused" ? (by ? `Paused \u00b7 ${by}` : "Paused") : String(by || name) };
+  return { title: String(a.media_title), sub: state === "paused" ? (by ? `Paused \u00b7 ${by}` : "Paused") : String(by || name) };
 }
 
 export const capitalize = (s: string): string => (s ? s[0].toUpperCase() + s.slice(1).replace(/_/g, " ") : s);
