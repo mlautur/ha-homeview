@@ -1,6 +1,7 @@
 # HomeView on an Echo Show 5 (960x480, landscape) as a bedside screen: no navigation bar, swipe between pages.
 # Home is the clock over the calendar with the photo slideshow filling the right half; Controls is a 2x2 grid of
-# quadrants with the clock top left; Music, Cameras, Weather and Calendar fill the screen. Dashboard URL: /echo-show (the tile on Controls opens /echo-show/music).
+# quadrants with the clock top left; Music, Cameras, Weather and Calendar fill the screen.
+# Dashboard URL: /echo-show (the tile on Controls opens /echo-show/music).
 #
 # Needs:
 # - the homeview-echo theme from examples/echo-show-theme.yaml (the quadrant spacing of the Sections views);
