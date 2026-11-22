@@ -511,7 +511,7 @@ await gesturePage.evaluate(async () => {
     cell.appendChild(el);
     return el;
   };
-  const cards = [make({})];
+  const cards = [make({}), make({ swipe: false })];
   const show = () => document.querySelector("homeview-photo-slideshow");
   // a pointer gesture from the middle of `target` by (dx, dy)
   const gesture = (target, dx, dy) => {
@@ -592,6 +592,16 @@ await settle(3 * 3600 * 1000 - 5000);
 gs.before3h = !!(await g("slideshow"));
 await settle(6000);
 gs.after3h = !!(await g("slideshow"));
+// swipe: false: horizontal drags are the page's (no "swiper" class, no stepping); a tap still opens the slideshow
+gs.noSwipe = { swiper: await gesturePage.evaluate(() => window.__g.card(1).classList.contains("swiper")), before: await g("shown", 1) };
+await g("swipe", 1, -200);
+await settle();
+gs.noSwipe.afterLeft = await g("shown", 1);
+await g("tap", 1);
+await settle(500);
+gs.noSwipe.open = !!(await g("slideshow"));
+await gesturePage.keyboard.press("Escape");
+await settle();
 
 // the weather, up next, camera, vacuum and media cards against a stub Home Assistant: what they show,
 // the service calls they make (recorded, nothing real), and the camera / vacuum overlays.
@@ -783,18 +793,18 @@ result.cards = await cardsPage.evaluate(async () => {
   const pg = camPage.shadowRoot.querySelector("homeview-camera-page");
   const pq = (s) => pg.shadowRoot.querySelector(s);
   const pageNow = () => ({ name: pq(".pill-name")?.textContent, live: [...pg.shadowRoot.querySelectorAll("img.live")].map((i) => i.getAttribute("src")), mute: pq(".mute").getAttribute("aria-label"), dots: pg.shadowRoot.querySelectorAll(".dots i").length });
-  const drag = async (dx, dy) => {
+  const drag = async (dx, dy, ms = 700, moves = 5) => {
     const st = pq(".stage");
     const ev = (type, x, y) => st.dispatchEvent(new PointerEvent(type, { pointerId: 7, pointerType: "touch", isPrimary: true, clientX: x, clientY: y, bubbles: true, composed: true }));
     ev("pointerdown", 500, 240);
-    for (let i = 1; i <= 5; i++) ev("pointermove", 500 + (dx * i) / 5, 240 + (dy * i) / 5);
+    for (let i = 1; i <= moves; i++) ev("pointermove", 500 + (dx * i) / moves, 240 + (dy * i) / moves);
     ev("pointerup", 500 + dx, 240 + dy);
     let reached = false;
     const seen = () => (reached = true);
     document.addEventListener("touchend", seen, true);
     st.dispatchEvent(new Event("touchend", { bubbles: true, composed: true }));
     document.removeEventListener("touchend", seen, true);
-    await wait(700);
+    await wait(ms);
     return reached;
   };
   // below the fold it streams nothing; scrolled into view, the camera on screen streams
@@ -817,7 +827,10 @@ result.cards = await cardsPage.evaluate(async () => {
   out.camPage.firstReached = await drag(300, 0);
   out.camPage.first2 = { ...pageNow(), cams: pg.shadowRoot.querySelectorAll(".cam").length };
   await drag(-300, 0);
-  await drag(-300, 0);
+  // a quick second flick (one move) while the last camera still slides in: it lands there and leaves the page
+  await drag(-300, 0, 0);
+  out.camPage.quickLastReached = await drag(-300, 0, 700, 1);
+  out.camPage.quickLast = pageNow();
   out.camPage.lastReached = await drag(-300, 0);
   out.camPage.last = pageNow();
   pq(".mute").click();
@@ -1119,6 +1132,8 @@ if (gs.open && gs.open.shown !== gs.cardAtOpen) fail.push(`photo slideshow: open
 if (!gs.openAfterLeft || gs.openAfterLeft.shown === gs.open?.shown || gs.openAfterLeft.shown !== gs.cardAfterLeft) fail.push(`photo slideshow: a swipe left did not step the slideshow and the card together (${JSON.stringify([gs.openAfterLeft, gs.cardAfterLeft])})`);
 if (gs.afterSwipeDown) fail.push("photo slideshow: still open after a swipe down");
 if (!gs.reopened || gs.afterEscape) fail.push("photo slideshow: Escape did not close it");
+if (gs.noSwipe.swiper || !gs.noSwipe.before || gs.noSwipe.afterLeft !== gs.noSwipe.before) fail.push(`photo swipe: false: expected no swiper class and a swipe that keeps the picture, got ${JSON.stringify(gs.noSwipe)}`);
+if (!gs.noSwipe.open) fail.push("photo swipe: false: a tap did not open the slideshow");
 if (gs.driftOpen) fail.push("photo slideshow: a 9 px drag opened the slideshow as a tap");
 if (gs.afterDrift === gs.beforeDrift) fail.push("photo gestures: no timed change after a 9 px drag; the slideshow stopped");
 if (!gs.before3h || gs.after3h) fail.push(`photo slideshow: expected it open until 3 h and closed after (open before: ${gs.before3h}, after: ${gs.after3h})`);
@@ -1180,6 +1195,7 @@ if (cp.leftReached) fail.push("camera page: Swipe Navigation saw the end of a sw
 if (cp.first2.name !== "Front" || cp.first2.cams !== 2) fail.push(`camera page: a swipe right on the first camera shows ${cp.first2.name} with ${cp.first2.cams} cameras in the strip, expected Front and no wrapped-in last camera`);
 if (!cp.firstReached) fail.push("camera page: a swipe right on the first camera never reached Swipe Navigation, so it cannot go to the previous view");
 if (cp.last.name !== "Back" || !doorLive(cp.last)) fail.push(`camera page: a swipe left on the last camera shows ${JSON.stringify(cp.last)}, expected to stay on Back with its stream`);
+if (!cp.quickLastReached || cp.quickLast.name !== "Back") fail.push(`camera page: a quick second swipe left while sliding to the last camera shows ${cp.quickLast.name} and ${cp.quickLastReached ? "reached" : "never reached"} Swipe Navigation, expected Back and the next view`);
 if (!cp.lastReached) fail.push("camera page: a swipe left on the last camera never reached Swipe Navigation, so it cannot go to the next view");
 if (!cp.landedSnap[0] || cp.landedSnap[0] !== cp.landedSnap[1]) fail.push(`camera page: the camera that slid in showed ${cp.landedSnap[0]} but landed with ${cp.landedSnap[1]}, a new snapshot the old picture shows through until it loads`);
 if (cp.unmuted.mute !== "Mute") fail.push("camera page: the speaker button did not unmute");

@@ -51,6 +51,7 @@ views:
             media: media-source://media_source/local/photos
             interval: 30
             shuffle: true
+            swipe: false # swipes on the photo change the page, like the rest of Home; tap for the slideshow
             grid_options: { columns: 12, rows: 8 }
           # bottom left: today's events, or what's next once today is done
           - type: custom:homeview-calendar-card

@@ -114,9 +114,12 @@ interval: 30              # seconds per picture
 shuffle: true
 recursive: true           # include subfolders
 fit: cover                # cover | contain
+swipe: true               # false: swipes are left to the page
 ```
 
 Swipe left on the frame for the next picture and right for the previous one. Previous retraces the pictures already shown, so it also works with `shuffle`. A swipe restarts the picture's time. Vertical drags still scroll the page.
+
+`swipe: false` leaves horizontal swipes on the frame to the page, so [Swipe Navigation](#swipe-navigation) changes the view from it too. Tapping still opens the full-screen slideshow.
 
 Tap the frame for a full-screen slideshow over the whole dashboard. It shows the same pictures at the same pace, and swiping left and right works there too. To close it, swipe down, press Escape or use the back gesture. It also closes by itself after 3 hours. While it runs, the screen stays on where the browser allows it: over HTTPS, in browsers with the Screen Wake Lock API.
 
@@ -312,7 +315,7 @@ voice_overlay:
 
 ### Swipe Navigation
 
-[Swipe Navigation](https://github.com/zanna-37/hass-swipe-navigation) swipes between dashboard views, for example from the panel to a view of cameras. It works with HomeView. Swipes on the photo frame still change the picture, not the view. Swipes on a camera page change the camera, and past the last or first camera they change the view.
+[Swipe Navigation](https://github.com/zanna-37/hass-swipe-navigation) swipes between dashboard views, for example from the panel to a view of cameras. It works with HomeView. Swipes on the photo frame still change the picture, not the view, unless it has `swipe: false`. Swipes on a camera page change the camera, and past the last or first camera they change the view.
 
 ### Voice needs HTTPS for the microphone
 

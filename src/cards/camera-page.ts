@@ -163,10 +163,13 @@ export class HomeViewCameraPage extends LitElement {
   // ---- moving between cameras ----
 
   private dragTo(dx: number): void {
-    const into = cameraStep(this._cur, dx < 0 ? 1 : -1, this.cams.length) !== null;
-    this.ours = this._picker || into;
-    if (this._picker) return;
+    if (this._picker) {
+      this.ours = true;
+      return;
+    }
     this.finishSlide();
+    const into = cameraStep(this._cur, dx < 0 ? 1 : -1, this.cams.length) !== null;
+    this.ours = into;
     this._still = true;
     this._drag = into ? dx : dx / 3; // past the first or last camera it resists, and the view may change instead
   }
