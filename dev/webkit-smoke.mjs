@@ -543,6 +543,16 @@ const settle = async (ms = 1000) => {
 };
 const gs = (result.gestures = {});
 await settle(2000);
+// swipe: false (checked first, well inside its 30 s picture time, so a timed change cannot pass for a swipe): horizontal drags are the page's (no "swiper" class, no stepping); a tap still opens the slideshow
+gs.noSwipe = { swiper: await gesturePage.evaluate(() => window.__g.card(1).classList.contains("swiper")), before: await g("shown", 1) };
+await g("swipe", 1, -200);
+await settle();
+gs.noSwipe.afterLeft = await g("shown", 1);
+await g("tap", 1);
+await settle(500);
+gs.noSwipe.open = !!(await g("slideshow"));
+await gesturePage.keyboard.press("Escape");
+await settle();
 gs.first = await g("shown", 0);
 await g("swipe", 0, -200);
 await settle();
@@ -592,16 +602,6 @@ await settle(3 * 3600 * 1000 - 5000);
 gs.before3h = !!(await g("slideshow"));
 await settle(6000);
 gs.after3h = !!(await g("slideshow"));
-// swipe: false: horizontal drags are the page's (no "swiper" class, no stepping); a tap still opens the slideshow
-gs.noSwipe = { swiper: await gesturePage.evaluate(() => window.__g.card(1).classList.contains("swiper")), before: await g("shown", 1) };
-await g("swipe", 1, -200);
-await settle();
-gs.noSwipe.afterLeft = await g("shown", 1);
-await g("tap", 1);
-await settle(500);
-gs.noSwipe.open = !!(await g("slideshow"));
-await gesturePage.keyboard.press("Escape");
-await settle();
 
 // the weather, up next, camera, vacuum and media cards against a stub Home Assistant: what they show,
 // the service calls they make (recorded, nothing real), and the camera / vacuum overlays.
