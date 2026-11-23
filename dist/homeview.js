@@ -2895,4 +2895,4 @@ try { registerProcessor("homeview-recorder", HomeViewRecorder); } catch {}
           transform: scaleX(0.6);
         }
       }
-    `];customElements.define("homeview-media-card",ke);O("homeview-media-card","HomeView Now Playing","One media player full screen: album art, progress, transport, volume, shuffle and repeat.");customElements.get("homeview-card-editor")||customElements.define("homeview-card-editor",He);console.info("%c HOMEVIEW %c 0.1.10 ","background:#928980;color:#fff;border-radius:3px 0 0 3px","background:#2b241d;color:#fff;border-radius:0 3px 3px 0");
+    `];customElements.define("homeview-media-card",ke);O("homeview-media-card","HomeView Now Playing","One media player full screen: album art, progress, transport, volume, shuffle and repeat.");customElements.get("homeview-card-editor")||customElements.define("homeview-card-editor",He);console.info("%c HOMEVIEW %c 0.1.11 ","background:#928980;color:#fff;border-radius:3px 0 0 3px","background:#2b241d;color:#fff;border-radius:0 3px 3px 0");
