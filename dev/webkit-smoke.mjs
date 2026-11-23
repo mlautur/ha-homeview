@@ -20,7 +20,7 @@
 // or if the camera card's page mode does not stream just the camera on screen, swipe between cameras while ignoring
 // vertical drags, hide a swipe between cameras from Swipe Navigation or keep a swipe past the first / last camera from it, unmute, pick from its grid, or go home.
 // or if the Now Playing card does not tick its progress, control its one player, open its volume slider or go back home.
-// or if the digital clock, the calendar's day and list layouts, the weather page or a tile's navigate tap go wrong
+// or if the digital clock, the calendar's day, glance and list layouts, the weather page or a tile's navigate tap go wrong
 // (wrong text, glass where the text should sit on the wallpaper, a free/busy event without "Busy", no navigation),
 // or if the voice overlay does not follow its satellite (shown, linger, hide, never unavailable or in edit mode), takes touches
 // or history, drops out on a swipe mid-reply, or reads the transcript without transcript: true or as a non-admin.
@@ -729,6 +729,7 @@ result.cards = await cardsPage.evaluate(async () => {
   const three = ["calendar.family", "calendar.school", "calendar.busy"];
   const dayCal = await make("homeview-calendar-card", { layout: "day", entities: three }, 448, 208);
   const listCal = await make("homeview-calendar-card", { layout: "list", entities: three }, 960, 480);
+  const glanceCal = await make("homeview-calendar-card", { layout: "glance", entities: three }, 448, 208);
   const page = await make("homeview-weather-card", { entity: "weather.home", forecast_days: 4 }, 960, 480);
   const digital = await make("homeview-clock-card", { face: "digital" }, 448, 208);
   const goes = await make("homeview-tile-card", { entity: "media_player.room", tap_action: "navigate", navigation_path: "/echo-show/music", grid_options: { rows: 3 } }, 234, 184);
@@ -738,6 +739,7 @@ result.cards = await cardsPage.evaluate(async () => {
   const all = (el, sel) => [...el.shadowRoot.querySelectorAll(sel)].map((e) => e.textContent.replace(/\s+/g, " ").trim());
   const glassy = (el) => !!el.shadowRoot.querySelector("canvas.hv-bake, .hv-glass");
   out.day = { head: all(dayCal, ".dtitle")[0], titles: all(dayCal, ".summary"), when: all(dayCal, ".when") };
+  out.glance = { pill: all(glanceCal, ".pill")[0], cue: all(glanceCal, ".cue")[0], hero: all(glanceCal, ".hero")[0], time: all(glanceCal, ".htime")[0], rows: all(glanceCal, ".gtitle"), when: all(glanceCal, ".gwhen") };
   out.list = { titles: all(listCal, ".ltitle"), rel: all(listCal, ".rel"), today: !!listCal.shadowRoot.querySelector(".lbadge.today.hv-frost"), glassy: glassy(listCal) };
   out.page = { text: text(page), days: all(page, ".dn"), glassy: glassy(page), frost: !!page.shadowRoot.querySelector(".days.hv-frost") };
   out.digital = { time: all(digital, ".time")[0], date: all(digital, ".date")[0], glassy: glassy(digital) };
@@ -1226,6 +1228,9 @@ if (!/Golden Hour/.test(np.held.text) || !/Artist/.test(np.held.text) || /Not pl
   fail.push(`now playing: an idle player that keeps its track shows ${JSON.stringify(np.held)}, expected it paused: art, title, artist, Play and Next enabled`);
 if (c.day.head !== "Today" || c.day.titles.join() !== "Now,Holiday,Busy" || !/^Tomorrow · All day$/.test(c.day.when[1] ?? ""))
   fail.push(`calendar day: ${JSON.stringify(c.day)}, expected Today with Now, then Holiday (Tomorrow · All day) and the untitled event as Busy`);
+// glance: the timed event under way is the big one, with its time left and end; the all-day Holiday never is
+if (c.glance.pill !== "Now" || c.glance.hero !== "Now" || !/ left$/.test(c.glance.cue ?? "") || !/^Until tomorrow /.test(c.glance.time ?? "") || c.glance.rows.join() !== "Busy,Holiday" || c.glance.when[1] !== "Tomorrow")
+  fail.push(`calendar glance: ${JSON.stringify(c.glance)}, expected Now with its time left and end (tomorrow), then the untitled event as Busy and the all-day Holiday (Tomorrow)`);
 if (c.list.titles.join() !== "Now,Holiday,Busy,Later" || c.list.rel.join() !== "today,tomorrow,in 2 days,in 3 days" || !c.list.today || c.list.glassy)
   fail.push(`calendar list: ${JSON.stringify(c.list)}, expected 4 rows today / tomorrow / in 2 / in 3 days, today's badge on glass and no glass card`);
 if (!/Partly Cloudy/.test(c.page.text) || !/64°/.test(c.page.text) || !/71° \/ 54° · 40% rain/.test(c.page.text) || c.page.days.join() !== "Today" || c.page.glassy || !c.page.frost)
@@ -1255,4 +1260,4 @@ if (fail.length) {
   console.error(`WebKit smoke FAILED:\n- ${fail.join("\n- ")}`);
   process.exit(1);
 }
-console.log("WebKit smoke passed: 5 cards defined and rendered, weather / up next / camera / vacuum / media tile / now playing show their data and make the right calls, camera live view and vacuum panel open and close, camera page streams one camera, swipes, leaves its ends to Swipe Navigation, unmutes, picks and goes home, digital clock / day and list calendars / weather page / tile navigate right, music page opens on play and goes home after a pause, voice overlay follows the satellite across a swipe, lingers after a reply and reads the transcript only for admins, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly, photo frame recovers from lost answers, swipes and opens / closes its full-screen slideshow");
+console.log("WebKit smoke passed: 5 cards defined and rendered, weather / up next / camera / vacuum / media tile / now playing show their data and make the right calls, camera live view and vacuum panel open and close, camera page streams one camera, swipes, leaves its ends to Swipe Navigation, unmutes, picks and goes home, digital clock / day, glance and list calendars / weather page / tile navigate right, music page opens on play and goes home after a pause, voice overlay follows the satellite across a swipe, lingers after a reply and reads the transcript only for admins, clock round, hidden photo card idle, voice error contained and round, long transcript clamped, mic flows end runs and release the microphone, stalled reply stopped and retried, slow reply waits, detached reply ends quietly, photo frame recovers from lost answers, swipes and opens / closes its full-screen slideshow");

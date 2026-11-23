@@ -454,6 +454,14 @@ export interface CalendarEvent {
   calendar?: string;
 }
 
+/** the calendar card's layouts, as its visual editor offers them (strip is the default) */
+export const CALENDAR_LAYOUTS = [
+  { value: "strip", label: "Strip: the next events in a row" },
+  { value: "day", label: "Day: today, else what's next" },
+  { value: "glance", label: "Glance: now, else next, in large type" },
+  { value: "list", label: "List: a full-page agenda" },
+] as const;
+
 export const isAllDay = (e: CalendarEvent): boolean => e.start.length === 10;
 
 /** A calendar time: a bare date is local midnight (not UTC midnight, as Date would read it). */
@@ -487,6 +495,45 @@ export function dayAgenda(events: CalendarEvent[], now: Date, n: number): { toda
   const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
   const left = upcoming(events, now, Infinity);
   return { today: left.filter((e) => calendarTime(e.start) < tomorrow).length, events: left.slice(0, n) };
+}
+
+/**
+ * The glance layout: the timed event under way (`now`), the next timed one to start, and the rest
+ * still to come, soonest first. An all-day event is never now or next (a holiday is not a meeting); it
+ * only follows in `rest`. An event ending at this minute is over, one starting at it is under way.
+ */
+export function glance(events: CalendarEvent[], now: Date): { now?: CalendarEvent; next?: CalendarEvent; rest: CalendarEvent[] } {
+  const left = upcoming(events, now, Infinity);
+  const timed = left.filter((e) => !isAllDay(e));
+  const current = timed.find((e) => calendarTime(e.start) <= now);
+  const next = timed.find((e) => calendarTime(e.start) > now);
+  return { now: current, next, rest: left.filter((e) => e !== current && e !== next) };
+}
+
+/** How long from one time to a later one, to the minute rounded up: "25 min", "1 hr", "2 hr 5 min". */
+export function duration(from: Date, to: Date): string {
+  const min = Math.max(0, Math.ceil((to.getTime() - from.getTime()) / 60000));
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return h ? (m ? `${h} hr ${m} min` : `${h} hr`) : `${m} min`;
+}
+
+const clockTime = (d: Date, locale?: string): string => d.toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" });
+
+/** When an event that has not started starts, as a glance: "In 25 min" within the hour, else "Today", "Tomorrow" or the weekday. */
+export function startCue(e: CalendarEvent, now: Date, locale?: string): string {
+  const start = calendarTime(e.start);
+  if (start.getTime() - now.getTime() <= 3600000) return `In ${duration(now, start)}`;
+  const d = daysUntil(e, now);
+  return d < 2 ? capitalize(relativeDay(e, now, locale)) : start.toLocaleDateString(locale, { weekday: "long" });
+}
+
+/** When an event under way ends: "Until 10:30 AM", with the day when it is not today. */
+export function endCue(e: CalendarEvent, now: Date, locale?: string): string {
+  const end = calendarTime(e.end);
+  const d = Math.round((dayStart(end).getTime() - dayStart(now).getTime()) / 86400000);
+  const day = d === 0 ? "" : `${d === 1 ? new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(1, "day") : end.toLocaleDateString(locale, { weekday: "short" })} `;
+  return `Until ${day}${clockTime(end, locale)}`;
 }
 
 /** Whole days from today to an event's day (0 for an event under way). */

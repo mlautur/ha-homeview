@@ -10,7 +10,7 @@ A card pack that brings an Apple HomeView-style wall panel to Home Assistant. Re
 | Photo frame | `custom:homeview-photo-card` | Slideshow from one or more Home Assistant media source folders (local media, DLNA, Synology Photos, ...). Swipe for the next or previous picture; tap for a full-screen slideshow. |
 | Voice | `custom:homeview-voice-card` | Talk to Assist with an audio-reactive visualizer, or mirror an `assist_satellite` device. |
 | Weather | `custom:homeview-weather-card` | Time and date, a big temperature, the condition, and today's high, low and chance of rain. Or a full weather page with the next days. |
-| Up next | `custom:homeview-calendar-card` | The next events from one or more calendars: a strip, a day panel (today, else what's next) or a full-page agenda. |
+| Up next | `custom:homeview-calendar-card` | The next events from one or more calendars: a strip, a day panel (today, else what's next), a glance panel (the meeting on now, else the next one, in large type) or a full-page agenda. |
 | Camera | `custom:homeview-camera-card` | Snapshot tile, refreshed every few seconds. Tap for the live stream full screen. With `entities`, a full-screen page of live cameras to swipe through. |
 | Vacuum | `custom:homeview-vacuum-card` | Robot vacuum tile. Tap for a panel with the map, rooms, start / pause / dock / locate, suction and mop modes. |
 | Now Playing | `custom:homeview-media-card` | One media player full screen: album art over a blurred copy of it, a seekable progress bar, previous / play / next, volume, shuffle and repeat. |
@@ -181,16 +181,17 @@ entities:
   - calendar.family
   - entity: calendar.school
     color: "#30d158"      # optional; each calendar gets its own colour by default
-layout: strip             # strip (default) | day | list
+layout: strip             # strip (default) | day | glance | list
 title: Up next            # optional (strip and day)
 days: 14                  # how far ahead to look (7)
-count: 3                  # at most this many events (strip: 3; day and list: as many as fit)
+count: 3                  # at most this many events (strip: 3; day, glance and list: as many as fit)
 ```
 
 Each event has a day badge (TODAY, or the weekday), its title, a dot in its calendar's colour and its time or "All day". Events that ended drop off. An event that is still going counts as today. An event with no title, as a free/busy-only shared calendar sends, reads *Busy*. The card reads the calendars again every 15 minutes, and whenever a calendar starts or ends an event. Size it as a strip, for example full width by 2 rows.
 
-Two more layouts:
+Three more layouts:
 - `layout: day`: a glass panel headed *Today* with what is left of today, each event with a bar in its calendar's colour, its title and time; the one under way is highlighted. Rows left over show what comes next, with the day ("Tomorrow · 6:00 PM"). Once today is done the panel reads *Up next* and *Nothing else today*. It fits a quadrant (12x4 in a two-column section shows three events) and shows more when it is taller.
+- `layout: glance`: a glass panel to read from across the room. It answers one question in large type: is a meeting on now, and if not, when is the next one. A meeting under way reads *Now* (green), its time left ("25 min left"), its title and when it ends ("Until 10:30 AM"). Otherwise it reads *Next* (amber within the hour), when it starts ("In 25 min", "Tomorrow", "Thursday"), its title and its time. All-day events are never the big one, so a holiday never reads as a meeting; they follow below with the later events, one short line each, while there is room. With nothing coming up it reads *Free* and *Nothing scheduled*. It fits a quadrant (12x4 in a two-column section, with two later events).
 - `layout: list`: a full-page agenda for a `panel` view, straight on the wallpaper. One row per event: a date badge (today's on glass), the title and time, and how far off it is ("today", "tomorrow", "in 3 days"). Events on the same day share one badge. It shows as many as fit.
 
 ```yaml
