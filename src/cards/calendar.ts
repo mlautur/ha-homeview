@@ -299,7 +299,7 @@ export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
     // each event is a row tinted in its calendar's colour: a timed one leads with a bar, an all-day one with a round icon
     const mark = (e: CalendarEvent): TemplateResult => (isAllDay(e) ? html`<span class="gico">${ICONS.calendar}</span>` : html`<i class="gbar"></i>`);
     const htime = time ? html`<div class="htime">${hero ? ICONS.clock : nothing}<span>${time}</span></div>` : nothing;
-    return html`<div class="glanceview ink ${g.now ? "is-now" : soon ? "is-soon" : hero ? "is-next" : "is-free"}" title=${this._error || nothing}>
+    return html`<div class="glanceview ink ${g.now ? "is-now" : soon ? "is-soon" : hero ? "is-next" : "is-free"}${rows.length ? " has-rows" : ""}" title=${this._error || nothing}>
       ${state ? html`<div class="eyebrow"><span class="state">${state}</span><span class="cue">${cue}</span></div>` : nothing}
       ${hero
         ? html`<div class="ev big" style="--c:${color(hero)}">${mark(hero)}<div class="evtext"><div class="hero">${title}</div>${htime}</div></div>`
@@ -650,6 +650,14 @@ export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+      }
+      /* no meetings but all-day events: the heading starts where a meeting's state line would, rows below it */
+      .is-free.has-rows {
+        justify-content: flex-start;
+      }
+      .is-free > .hero {
+        line-height: 1.05;
+        margin-bottom: calc(var(--hv-ref) * 0.03);
       }
       .htime {
         flex: none;

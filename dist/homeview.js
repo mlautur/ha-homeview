@@ -1410,7 +1410,7 @@ try { registerProcessor("homeview-recorder", HomeViewRecorder); } catch {}
         <span class="aside">${h}</span>
       </div>
       <div class="rows">${u}</div>
-    </div>`}renderGlance(e,t,s){let n=this.hass.language,a=this._now,o=this._events?Bi(this._events,a):{rest:[]},l=o.now??o.next,c=(o.now&&o.next?[o.next,...o.rest]:o.rest).slice(0,Math.max(0,e-1)),h=!o.now&&!!l&&D(l.start).getTime()-a.getTime()<=36e5,d=o.now?"Now":l?"Next":"",u=o.now?`${Ut(a,D(o.now.end))} left`:l?qi(l,a,n):"",f=l?Q(l):o.rest.length?"No meetings":"Nothing scheduled",g=o.now?ji(o.now,a,n):l?me(l,n):o.rest.length?"":`Next ${this._config.days??7} days are clear`,k=$=>{let x=De($,a),v=x===0?"":x===1?j(ze($,a,n)):Ie($,a,n).weekday;return ue($)?v||"All day":[v,D($.start).toLocaleTimeString(n,{hour:"numeric",minute:"2-digit"})].filter(Boolean).join(" ")};if(s)return p`<div class="glanceview" title=${this._error||m}>${s}</div>`;let T=$=>ue($)?p`<span class="gico">${b.calendar}</span>`:p`<i class="gbar"></i>`,w=g?p`<div class="htime">${l?b.clock:m}<span>${g}</span></div>`:m;return p`<div class="glanceview ink ${o.now?"is-now":h?"is-soon":l?"is-next":"is-free"}" title=${this._error||m}>
+    </div>`}renderGlance(e,t,s){let n=this.hass.language,a=this._now,o=this._events?Bi(this._events,a):{rest:[]},l=o.now??o.next,c=(o.now&&o.next?[o.next,...o.rest]:o.rest).slice(0,Math.max(0,e-1)),h=!o.now&&!!l&&D(l.start).getTime()-a.getTime()<=36e5,d=o.now?"Now":l?"Next":"",u=o.now?`${Ut(a,D(o.now.end))} left`:l?qi(l,a,n):"",f=l?Q(l):o.rest.length?"No meetings":"Nothing scheduled",g=o.now?ji(o.now,a,n):l?me(l,n):o.rest.length?"":`Next ${this._config.days??7} days are clear`,k=$=>{let x=De($,a),v=x===0?"":x===1?j(ze($,a,n)):Ie($,a,n).weekday;return ue($)?v||"All day":[v,D($.start).toLocaleTimeString(n,{hour:"numeric",minute:"2-digit"})].filter(Boolean).join(" ")};if(s)return p`<div class="glanceview" title=${this._error||m}>${s}</div>`;let T=$=>ue($)?p`<span class="gico">${b.calendar}</span>`:p`<i class="gbar"></i>`,w=g?p`<div class="htime">${l?b.clock:m}<span>${g}</span></div>`:m;return p`<div class="glanceview ink ${o.now?"is-now":h?"is-soon":l?"is-next":"is-free"}${c.length?" has-rows":""}" title=${this._error||m}>
       ${d?p`<div class="eyebrow"><span class="state">${d}</span><span class="cue">${u}</span></div>`:m}
       ${l?p`<div class="ev big" style="--c:${t(l)}">${T(l)}<div class="evtext"><div class="hero">${f}</div>${w}</div></div>`:p`<div class="hero">${f}</div>${w}`}
       ${c.map($=>p`<div class="ev lat" style="--c:${t($)}">
@@ -1738,6 +1738,14 @@ try { registerProcessor("homeview-recorder", HomeViewRecorder); } catch {}
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+      }
+      /* no meetings but all-day events: the heading starts where a meeting's state line would, rows below it */
+      .is-free.has-rows {
+        justify-content: flex-start;
+      }
+      .is-free > .hero {
+        line-height: 1.05;
+        margin-bottom: calc(var(--hv-ref) * 0.03);
       }
       .htime {
         flex: none;
