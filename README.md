@@ -261,7 +261,7 @@ A full-screen Now Playing screen, laid out for a landscape wall panel or an Echo
 - previous, play / pause and next;
 - volume, shuffle and repeat (off, all, one). Volume opens a slider beside its button; a tap elsewhere closes it, and so does leaving it alone for 5 seconds.
 
-Buttons the player does not support are hidden (volume, shuffle, repeat) or dimmed (previous, next, seek). When nothing is playing, the card shows an empty art frame, *Not playing* and the player's name over the wallpaper, and play resumes the player. The card controls only its own player: there is no speaker picker. The layout is landscape only: art on the left, controls on the right, scaled to the screen.
+Buttons the player does not support are hidden (volume, shuffle, repeat) or dimmed (previous, next, seek). When nothing is playing, the card shows an empty art frame, *Not playing* and the player's name over the wallpaper, and play resumes the player. A player that goes idle on pause but keeps its track (as Music Assistant does) shows as paused, art and all. The card controls only its own player: there is no speaker picker. The layout is landscape only: art on the left, controls on the right, scaled to the screen.
 
 Put it in a **panel** view so it fills the screen:
 

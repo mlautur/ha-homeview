@@ -8,7 +8,7 @@ import { HomeViewCard, glassStyles, type BaseConfig } from "./base.ts";
 import { areaName, domainOf, fireEvent, friendlyName, isUnavailable, navigate, registerCard, type GridOptions, type Hass } from "../ha.ts";
 import { iconFor } from "../icons.ts";
 import type { EditorField } from "../editor.ts";
-import { isActive, mediaLines, tapService } from "../logic.ts";
+import { isActive, mediaLines, mediaState, tapService } from "../logic.ts";
 
 export const TILE_DOMAINS = ["light", "switch", "fan", "lock", "cover", "scene", "script", "input_boolean", "media_player"];
 
@@ -96,7 +96,7 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
     let art = "";
     if (s && domain === "media_player" && !isUnavailable(s)) {
       ({ title: name, sub } = mediaLines(s, name));
-      if ((s.state === "playing" || s.state === "paused") && s.attributes.entity_picture) art = this.hass.hassUrl(s.attributes.entity_picture);
+      if (["playing", "paused"].includes(mediaState(s)) && s.attributes.entity_picture) art = this.hass.hassUrl(s.attributes.entity_picture);
     }
     if (!s) sub = "Entity not found";
     else if (s.state === "unavailable") sub = "Unavailable";
@@ -105,7 +105,7 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
     else if (domain === "lock" && ["locking", "unlocking", "jammed", "opening", "open"].includes(s.state))
       sub = s.state[0].toUpperCase() + s.state.slice(1) + (s.state.endsWith("ing") ? "\u2026" : "");
     // locks and covers read their own state (locked, open, closing...); scenes and scripts have none worth reading
-    const stateText = !s ? "missing" : domain === "lock" || domain === "cover" || domain === "media_player" ? s.state : domain === "scene" || domain === "script" ? "" : on ? "on" : "off";
+    const stateText = !s ? "missing" : domain === "lock" || domain === "cover" || domain === "media_player" ? mediaState(s) : domain === "scene" || domain === "script" ? "" : on ? "on" : "off";
     return html`<button
       class="hit"
       aria-label="${[name, sub, stateText].filter(Boolean).join(", ")}"
@@ -161,7 +161,7 @@ export class HomeViewTileCard extends HomeViewCard<TileConfig> {
       return;
     }
     this._confirming = false;
-    const svc = tapService(domain, s.state);
+    const svc = tapService(domain, mediaState(s));
     if (!svc) return;
     if (domain === "scene") {
       this._flash = true;

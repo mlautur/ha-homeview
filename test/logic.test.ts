@@ -232,7 +232,7 @@ test("voice: failures become a short status line and keep the full detail", () =
 });
 
 import {
-  calendarTime, cameraPages, cameraStep, clockText, cropTop, dayAgenda, dayBadge, eventTime, eventTitle, forecastDays, forecastType, mediaLines, pickerColumns, relativeDay,
+  calendarTime, cameraPages, cameraStep, clockText, cropTop, dayAgenda, dayBadge, eventTime, eventTitle, forecastDays, forecastType, mediaLines, mediaState, pickerColumns, relativeDay,
   roborockRooms, snapshotUrl, todayOutlook, upcoming, vacuumStatus, weatherName,
 } from "../src/logic.ts";
 
@@ -241,7 +241,15 @@ test("media tile: playing, paused and idle lines; tap toggles play / pause", () 
   assert.deepEqual(mediaLines(p("playing", { media_title: "Song", media_artist: "Band" }), "Family Room"), { title: "Song", sub: "Band" });
   assert.deepEqual(mediaLines(p("paused", { media_title: "Song", media_artist: "Band" }), "Family Room"), { title: "Song", sub: "Paused · Band" });
   assert.deepEqual(mediaLines(p("playing", { media_title: "TV Audio" }), "Family Room"), { title: "TV Audio", sub: "Family Room" });
-  assert.deepEqual(mediaLines(p("idle", { media_title: "Old" }), "Family Room"), { title: "Family Room", sub: "Not playing" });
+  // Music Assistant pauses to "idle" and keeps the track: that reads as paused, and a tap resumes it
+  const held = p("idle", { media_title: "Song", media_artist: "Band" });
+  assert.deepEqual(mediaLines(held, "Family Room"), { title: "Song", sub: "Paused · Band" });
+  assert.equal(mediaState(held), "paused");
+  assert.deepEqual(tapService("media_player", mediaState(held)), ["media_player", "media_play_pause"]);
+  assert.deepEqual(mediaLines(p("idle"), "Family Room"), { title: "Family Room", sub: "Not playing" });
+  assert.deepEqual(mediaLines(p("off", { media_title: "Old" }), "Family Room"), { title: "Family Room", sub: "Not playing" });
+  assert.deepEqual(mediaLines(p("standby", { media_title: "Old" }), "Family Room"), { title: "Family Room", sub: "Not playing" });
+  assert.equal(mediaState(p("idle")), "idle");
   assert.equal(isActive("media_player", "playing"), true);
   assert.equal(isActive("media_player", "paused"), false);
   assert.deepEqual(tapService("media_player", "paused"), ["media_player", "media_play_pause"]);

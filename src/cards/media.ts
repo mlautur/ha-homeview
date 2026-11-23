@@ -9,7 +9,7 @@ import { HomeViewCard, glassStyles, type BaseConfig } from "./base.ts";
 import { domainOf, fireEvent, friendlyName, isUnavailable, registerCard, type GridOptions, type Hass } from "../ha.ts";
 import type { EditorField } from "../editor.ts";
 import { ICONS } from "../icons.ts";
-import { MEDIA, nextRepeat, mediaProgress, trackTime } from "../logic.ts";
+import { MEDIA, nextRepeat, mediaProgress, mediaState, trackTime } from "../logic.ts";
 
 export interface MediaConfig extends BaseConfig {
   entity: string;
@@ -206,7 +206,7 @@ export class HomeViewMediaCard extends HomeViewCard<MediaConfig> {
     const off = !s || isUnavailable(s);
     const a = s?.attributes ?? {};
     const f = off ? 0 : Number(a.supported_features) || 0;
-    const live = !!s && (s.state === "playing" || s.state === "paused" || s.state === "buffering");
+    const live = !!s && ["playing", "paused", "buffering"].includes(mediaState(s));
     const name = c.name ?? (s ? friendlyName(this.hass, c.entity) : c.entity);
     const pic = live && a.entity_picture ? this.hass.hassUrl(a.entity_picture) : "";
     const art = pic && pic !== this._artFailed ? pic : "";
