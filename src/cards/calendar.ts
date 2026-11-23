@@ -2,6 +2,8 @@
  * HomeView "Up next": a glass strip with the next few events from one or more calendars, each
  * with a day badge, its title, a dot in its calendar's colour and its time (or "All day").
  * `layout: day` is a glass panel with what is left of today, or what's next once today is done;
+ * `layout: glance` is a glass panel read from across a room: the meeting under way, else the next one, in
+ * large type, then what follows while there is room;
  * `layout: list` is a full-page agenda on the wallpaper, one row per event with a date badge.
  * Events come from calendar.get_events, read again every 15 minutes and whenever a calendar
  * starts or ends an event; nothing is read while the card is hidden.
@@ -11,7 +13,7 @@ import { HomeViewCard, glassStyles, type BaseConfig } from "./base.ts";
 import { domainOf, registerCard, type GridOptions, type Hass } from "../ha.ts";
 import type { EditorField } from "../editor.ts";
 import { ICONS } from "../icons.ts";
-import { calendarTime, capitalize, dayAgenda, dayBadge, daysUntil, eventTime, eventTitle, relativeDay, upcoming, within, type CalendarEvent } from "../logic.ts";
+import { CALENDAR_LAYOUTS, calendarTime, capitalize, dayAgenda, dayBadge, daysUntil, duration, endCue, eventTime, eventTitle, glance, isAllDay, relativeDay, startCue, upcoming, within, type CalendarEvent } from "../logic.ts";
 
 export interface CalendarEntry {
   entity: string;
@@ -26,11 +28,11 @@ export interface CalendarConfig extends BaseConfig {
   days?: number;
   /** at most this many events (default 3 on the strip, as many as fit otherwise; fewer when there is no room) */
   count?: number;
-  /** strip (default): a row of the next events; day: today, else what's next; list: a full-page agenda */
-  layout?: "strip" | "day" | "list";
+  /** strip (default): a row of the next events; day: today, else what's next; glance: now, else next, in large type; list: a full-page agenda */
+  layout?: "strip" | "day" | "glance" | "list";
 }
 
-const LAYOUTS = ["strip", "day", "list"];
+const LAYOUTS: string[] = CALENDAR_LAYOUTS.map((l) => l.value);
 
 const COLORS = ["#ff9f0a", "#30d158", "#0a84ff", "#bf5af2", "#ff375f", "#64d2ff"];
 const REFRESH_MS = 15 * 60 * 1000;
@@ -40,6 +42,7 @@ const EVENT_MIN_PX = 190;
 /** day panel and agenda geometry, in --hv-ref units (kept in step with the styles below) */
 const DAY = { pad: 0.07, head: 0.13, gap: 0.03, row: 0.22 };
 const LIST = { edge: 0.045, row: 0.227 };
+const GLANCE = { pad: 0.07, hero: 0.14 + 0.03 + 0.244 + 0.15, gap: 0.04, row: 0.125 };
 
 export const calendarEntries = (c: CalendarConfig): CalendarEntry[] =>
   (c.entities ?? []).map((e) => (typeof e === "string" ? { entity: e } : e)).map((e, i) => ({ entity: e.entity, color: e.color ?? COLORS[i % COLORS.length] }));
@@ -64,11 +67,7 @@ export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
       selector: {
         select: {
           mode: "dropdown",
-          options: [
-            { value: "strip", label: "Strip: the next events in a row" },
-            { value: "day", label: "Day: today, else what's next" },
-            { value: "list", label: "List: a full-page agenda" },
-          ],
+          options: [...CALENDAR_LAYOUTS],
         },
       },
     },
@@ -84,16 +83,16 @@ export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
   protected validate(config: CalendarConfig): void {
     if (!Array.isArray(config.entities) || !config.entities.length) throw new Error("Add one or more calendar entities");
     for (const e of calendarEntries(config)) if (!e.entity || domainOf(e.entity) !== "calendar") throw new Error(`Not a calendar: ${e.entity}`);
-    if (config.layout && !LAYOUTS.includes(config.layout)) throw new Error(`Unknown layout: ${config.layout} (strip, day or list)`);
+    if (config.layout && !LAYOUTS.includes(config.layout)) throw new Error(`Unknown layout: ${config.layout} (strip, day, glance or list)`);
   }
 
   // not `layout`: Home Assistant sets that property on every card
-  private get kind(): "strip" | "day" | "list" {
+  private get kind(): "strip" | "day" | "glance" | "list" {
     return this._config?.layout ?? "strip";
   }
 
   getGridOptions(): GridOptions {
-    if (this.kind === "day") return { columns: 12, rows: 4, min_columns: 6, min_rows: 3 };
+    if (this.kind === "day" || this.kind === "glance") return { columns: 12, rows: 4, min_columns: 6, min_rows: 3 };
     if (this.kind === "list") return { columns: "full", rows: 8, min_columns: 6, min_rows: 4 };
     return { columns: "full", rows: 2, min_columns: 6, min_rows: 1 };
   }
@@ -112,7 +111,7 @@ export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
   protected refFrom(w: number, h: number): number {
     this._width = w;
     this._height = h;
-    if (this.kind === "day") return Math.min(h, w * 0.5);
+    if (this.kind === "day" || this.kind === "glance") return Math.min(h, w * 0.5);
     if (this.kind === "list") return Math.min(w / 2, h);
     return Math.min(w, h * 2);
   }
@@ -125,6 +124,8 @@ export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
     if (this.kind === "strip") return Math.max(1, Math.floor((w * 0.82) / EVENT_MIN_PX));
     const ref = this.refFrom(w, h);
     if (this.kind === "day") return Math.max(1, Math.floor((h - ref * (2 * DAY.pad + DAY.head + DAY.gap) + 1) / (ref * DAY.row)));
+    // the big now / next, then a row for each later event that fits
+    if (this.kind === "glance") return 1 + Math.max(0, Math.floor((h - ref * (2 * GLANCE.pad + GLANCE.hero + GLANCE.gap) + 1) / (ref * GLANCE.row)));
     return Math.max(1, Math.floor((h - ref * 2 * LIST.edge + 1) / (ref * LIST.row)));
   }
 
@@ -213,6 +214,7 @@ export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
     const note = (text: string): TemplateResult => html`<div class="note ink">${text}</div>`;
     const waiting = !this._events ? note(this._error ? "Calendar unavailable" : "Loading\u2026") : undefined;
     if (this.kind === "day") return this.renderDay(n, color, waiting);
+    if (this.kind === "glance") return this.renderGlance(n, color, waiting);
     if (this.kind === "list") return this.renderList(n, color, waiting);
     const head = html`<div class="head ink">${ICONS.calendar}<span>${c.title ?? "Up next"}</span></div>`;
     const events = this._events ? upcoming(this._events, this._now, n) : [];
@@ -267,6 +269,42 @@ export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
         <span class="aside">${aside}</span>
       </div>
       <div class="rows">${body}</div>
+    </div>`;
+  }
+
+  /**
+   * The glance: is a meeting on now (and how long is left), else when is the next one; large, to read from
+   * across the room. Later events follow, one short line each, while there is room. An all-day event is
+   * never the big one: a holiday is not a meeting.
+   */
+  private renderGlance(n: number, color: (e: CalendarEvent) => string, waiting?: TemplateResult): TemplateResult {
+    const lang = this.hass!.language;
+    const now = this._now;
+    const g = this._events ? glance(this._events, now) : { rest: [] as CalendarEvent[] };
+    const hero = g.now ?? g.next;
+    const rows = (g.now && g.next ? [g.next, ...g.rest] : g.rest).slice(0, Math.max(0, n - 1));
+    const soon = !g.now && !!hero && calendarTime(hero.start).getTime() - now.getTime() <= 3600000;
+    const pill = g.now ? "Now" : hero ? "Next" : "Free";
+    const cue = g.now ? `${duration(now, calendarTime(g.now.end))} left` : hero ? startCue(hero, now, lang) : "";
+    const title = hero ? eventTitle(hero) : g.rest.length ? "No meetings" : "Nothing scheduled";
+    const time = g.now ? endCue(g.now, now, lang) : hero ? eventTime(hero, lang) : g.rest.length ? "" : `Next ${this._config!.days ?? 7} days are clear`;
+    // a later row: its time today, else its day too
+    const when = (e: CalendarEvent): string => {
+      const d = daysUntil(e, now);
+      const day = d === 0 ? "" : d === 1 ? capitalize(relativeDay(e, now, lang)) : dayBadge(e, now, lang).weekday;
+      if (isAllDay(e)) return day || "All day";
+      return [day, calendarTime(e.start).toLocaleTimeString(lang, { hour: "numeric", minute: "2-digit" })].filter(Boolean).join(" ");
+    };
+    if (waiting) return html`<div class="glanceview" title=${this._error || nothing}>${waiting}</div>`;
+    return html`<div class="glanceview ink ${g.now ? "is-now" : soon ? "is-soon" : hero ? "is-next" : "is-free"}" title=${this._error || nothing}>
+      <div class="eyebrow"><span class="pill">${pill}</span><span class="cue">${cue}</span></div>
+      <div class="hero">${title}</div>
+      ${time ? html`<div class="htime">${hero ? html`<i style="background:${color(hero)}"></i>` : nothing}${time}</div>` : nothing}
+      ${rows.length
+        ? html`<div class="later">
+            ${rows.map((e) => html`<div class="lat"><i style="background:${color(e)}"></i><span class="gwhen">${when(e)}</span><span class="gtitle">${eventTitle(e)}</span></div>`)}
+          </div>`
+        : nothing}
     </div>`;
   }
 
@@ -482,6 +520,121 @@ export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
         margin-top: 0;
         font-size: calc(var(--hv-ref) * 0.066);
         line-height: 1.25;
+      }
+
+      /* glance: a quadrant panel read from across a room (pad 0.07; eyebrow 0.14, gap 0.03, title 0.244 and time 0.15
+         of --hv-ref; then 0.04 and rows of 0.125; see GLANCE), centred when there is less to show */
+      .glanceview {
+        height: 100%;
+        box-sizing: border-box;
+        padding: calc(var(--hv-ref) * 0.07) calc(var(--hv-ref) * 0.085);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        min-width: 0;
+      }
+      .glanceview > .note {
+        flex: 1;
+        display: grid;
+        place-items: center;
+        padding: 0;
+        font-size: calc(var(--hv-ref) * 0.09);
+      }
+      .eyebrow {
+        flex: none;
+        height: calc(var(--hv-ref) * 0.14);
+        margin-bottom: calc(var(--hv-ref) * 0.03);
+        display: flex;
+        align-items: center;
+        gap: calc(var(--hv-ref) * 0.04);
+        font-size: calc(var(--hv-ref) * 0.09);
+        font-weight: 700;
+        white-space: nowrap;
+      }
+      .pill {
+        flex: none;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        padding: 0 calc(var(--hv-ref) * 0.05);
+        border-radius: 999px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        font-size: calc(var(--hv-ref) * 0.075);
+        background: rgb(255 255 255 / 0.9);
+        color: #2b2520;
+        text-shadow: none;
+      }
+      /* the state reads in words; the colour only backs it up (dark ink on every fill) */
+      .is-now .pill {
+        background: #30d158;
+        color: #03240d;
+      }
+      .is-soon .pill {
+        background: #ff9f0a;
+        color: #2a1600;
+      }
+      .cue {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .hero {
+        flex: none;
+        font-size: calc(var(--hv-ref) * 0.215);
+        line-height: 1.135;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .htime {
+        flex: none;
+        font-size: calc(var(--hv-ref) * 0.125);
+        line-height: 1.2;
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .htime i,
+      .lat i {
+        display: inline-block;
+        flex: none;
+        width: 0.5em;
+        height: 0.5em;
+        border-radius: 50%;
+        margin-right: 0.4em;
+        vertical-align: 0.08em;
+        box-shadow: 0 0 0 0.5px rgb(255 255 255 / 0.5);
+      }
+      .later {
+        flex: none;
+        overflow: hidden;
+        margin-top: calc(var(--hv-ref) * 0.04);
+        border-top: 0.5px solid rgb(255 255 255 / 0.35);
+      }
+      .lat {
+        height: calc(var(--hv-ref) * 0.125);
+        display: flex;
+        align-items: center;
+        gap: calc(var(--hv-ref) * 0.03);
+        font-size: calc(var(--hv-ref) * 0.08);
+        white-space: nowrap;
+      }
+      .lat i {
+        margin-right: 0;
+      }
+      .gwhen {
+        flex: none;
+        font-weight: 500;
+        color: var(--hv-ink-2);
+      }
+      .gtitle {
+        min-width: 0;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       /* list: a full-page agenda on the wallpaper (edge 0.045, rows 0.227 of --hv-ref; see LIST) */

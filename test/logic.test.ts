@@ -232,7 +232,7 @@ test("voice: failures become a short status line and keep the full detail", () =
 });
 
 import {
-  calendarTime, cameraPages, cameraStep, clockText, cropTop, dayAgenda, dayBadge, eventTime, eventTitle, forecastDays, forecastType, mediaLines, mediaState, pickerColumns, relativeDay,
+  CALENDAR_LAYOUTS, calendarTime, cameraPages, cameraStep, clockText, cropTop, dayAgenda, dayBadge, duration, endCue, glance, startCue, eventTime, eventTitle, forecastDays, forecastType, mediaLines, mediaState, pickerColumns, relativeDay,
   roborockRooms, snapshotUrl, todayOutlook, upcoming, vacuumStatus, weatherName,
 } from "../src/logic.ts";
 
@@ -314,6 +314,71 @@ test("calendar: day view is what is left of today, else what's next", () => {
   assert.equal(relativeDay(events[1], now, "en-US"), "today");
   assert.equal(relativeDay({ summary: "x", start: "2026-11-21", end: "2026-11-22" }, now, "en-US"), "tomorrow");
   assert.equal(relativeDay(events[3], now, "en-US"), "in 3 days");
+});
+
+test("calendar: the glance is the meeting under way, else the next one to start", () => {
+  const now = new Date(2026, 10, 20, 12, 0);
+  const at = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).toISOString();
+  const events = [
+    { summary: "Dinner", start: at(20, 18), end: at(20, 19) },
+    { summary: "Lunch", start: at(20, 11), end: at(20, 13) },
+    { summary: "Breakfast", start: at(20, 8), end: at(20, 9) },
+    { summary: "Dentist", start: at(23, 9), end: at(23, 10) },
+  ];
+  // in a meeting: it is now, the next one comes next, then the rest
+  assert.deepEqual(glance(events, now), { now: events[1], next: events[0], rest: [events[3]] });
+  // between meetings: nothing now, the next one, then the rest
+  const free = new Date(2026, 10, 20, 14, 0);
+  assert.deepEqual(glance(events, free), { now: undefined, next: events[0], rest: [events[3]] });
+  // nothing scheduled
+  assert.deepEqual(glance([], now), { now: undefined, next: undefined, rest: [] });
+  assert.deepEqual(glance(events, new Date(2026, 10, 24)), { now: undefined, next: undefined, rest: [] });
+});
+
+test("calendar: an all-day event is never now or next, it only follows", () => {
+  const now = new Date(2026, 10, 20, 12, 0);
+  const holiday = { summary: "Holiday", start: "2026-11-20", end: "2026-11-21" };
+  const trip = { summary: "Trip", start: "2026-11-21", end: "2026-11-22" };
+  assert.deepEqual(glance([holiday, trip], now), { now: undefined, next: undefined, rest: [holiday, trip] });
+  const call = { summary: "Call", start: new Date(2026, 10, 20, 15).toISOString(), end: new Date(2026, 10, 20, 16).toISOString() };
+  assert.deepEqual(glance([holiday, call], now), { now: undefined, next: call, rest: [holiday] });
+});
+
+test("calendar: back to back, a meeting ending at the minute is over and one starting at the minute is now", () => {
+  const at = (h: number, m = 0) => new Date(2026, 10, 20, h, m).toISOString();
+  const a = { summary: "A", start: at(9), end: at(10) };
+  const b = { summary: "B", start: at(10), end: at(10, 30) };
+  const c = { summary: "C", start: at(10, 30), end: at(11) };
+  assert.deepEqual(glance([c, b, a], new Date(2026, 10, 20, 9, 59)), { now: a, next: b, rest: [c] });
+  assert.deepEqual(glance([c, b, a], new Date(2026, 10, 20, 10, 0)), { now: b, next: c, rest: [] });
+  // the last one ends: nothing left
+  assert.deepEqual(glance([c, b, a], new Date(2026, 10, 20, 11, 0)), { now: undefined, next: undefined, rest: [] });
+  // two at once: the earlier one is now, the other follows
+  const d = { summary: "D", start: at(9, 30), end: at(10, 30) };
+  assert.deepEqual(glance([a, d], new Date(2026, 10, 20, 9, 45)), { now: a, next: undefined, rest: [d] });
+});
+
+test("calendar: how long until, and the glance's cues", () => {
+  const now = new Date(2026, 10, 20, 9, 35);
+  const at = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m);
+  assert.equal(duration(now, at(20, 10)), "25 min");
+  assert.equal(duration(new Date(2026, 10, 20, 9, 59, 10), at(20, 10)), "1 min");
+  assert.equal(duration(now, at(20, 10, 35)), "1 hr");
+  assert.equal(duration(now, at(20, 11, 40)), "2 hr 5 min");
+  const ev = (start: Date, end: Date) => ({ start: start.toISOString(), end: end.toISOString() });
+  assert.equal(startCue(ev(at(20, 10), at(20, 11)), now, "en-US"), "In 25 min");
+  assert.equal(startCue(ev(at(20, 10, 35), at(20, 11)), now, "en-US"), "In 1 hr");
+  assert.equal(startCue(ev(at(20, 15), at(20, 16)), now, "en-US"), "Today");
+  assert.equal(startCue(ev(at(21, 9), at(21, 10)), now, "en-US"), "Tomorrow");
+  assert.equal(startCue(ev(at(23, 9), at(23, 10)), now, "en-US"), "Monday");
+  assert.equal(endCue(ev(at(20, 9), at(20, 10)), now, "en-US"), "Until 10:00 AM");
+  assert.equal(endCue(ev(at(20, 9), at(21, 1)), now, "en-US"), "Until tomorrow 1:00 AM");
+  assert.equal(relativeDay({ summary: "x", start: "2026-11-21", end: "2026-11-22" }, now, "en-US"), "tomorrow");
+});
+
+test("calendar: the visual editor offers the glance layout beside the others", () => {
+  assert.deepEqual(CALENDAR_LAYOUTS.map((l) => l.value), ["strip", "day", "glance", "list"]);
+  assert.equal(CALENDAR_LAYOUTS.find((l) => l.value === "glance")?.label, "Glance: now, else next, in large type");
 });
 
 test("calendar: a free/busy-only event has no title and reads Busy", () => {
