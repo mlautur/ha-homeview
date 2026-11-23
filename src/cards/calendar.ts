@@ -42,7 +42,7 @@ const EVENT_MIN_PX = 190;
 /** day panel and agenda geometry, in --hv-ref units (kept in step with the styles below) */
 const DAY = { pad: 0.07, head: 0.13, gap: 0.03, row: 0.22 };
 const LIST = { edge: 0.045, row: 0.227 };
-const GLANCE = { pad: 0.07, hero: 0.14 + 0.03 + 0.244 + 0.15, gap: 0.04, row: 0.125 };
+const GLANCE = { pad: 0.07, hero: 0.11 + 0.03 + 0.41, gap: 0, row: 0.15 };
 
 export const calendarEntries = (c: CalendarConfig): CalendarEntry[] =>
   (c.entities ?? []).map((e) => (typeof e === "string" ? { entity: e } : e)).map((e, i) => ({ entity: e.entity, color: e.color ?? COLORS[i % COLORS.length] }));
@@ -284,7 +284,7 @@ export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
     const hero = g.now ?? g.next;
     const rows = (g.now && g.next ? [g.next, ...g.rest] : g.rest).slice(0, Math.max(0, n - 1));
     const soon = !g.now && !!hero && calendarTime(hero.start).getTime() - now.getTime() <= 3600000;
-    const pill = g.now ? "Now" : hero ? "Next" : "Free";
+    const state = g.now ? "Now" : hero ? "Next" : "";
     const cue = g.now ? `${duration(now, calendarTime(g.now.end))} left` : hero ? startCue(hero, now, lang) : "";
     const title = hero ? eventTitle(hero) : g.rest.length ? "No meetings" : "Nothing scheduled";
     const time = g.now ? endCue(g.now, now, lang) : hero ? eventTime(hero, lang) : g.rest.length ? "" : `Next ${this._config!.days ?? 7} days are clear`;
@@ -296,15 +296,19 @@ export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
       return [day, calendarTime(e.start).toLocaleTimeString(lang, { hour: "numeric", minute: "2-digit" })].filter(Boolean).join(" ");
     };
     if (waiting) return html`<div class="glanceview" title=${this._error || nothing}>${waiting}</div>`;
+    // each event is a row tinted in its calendar's colour: a timed one leads with a bar, an all-day one with a round icon
+    const mark = (e: CalendarEvent): TemplateResult => (isAllDay(e) ? html`<span class="gico">${ICONS.calendar}</span>` : html`<i class="gbar"></i>`);
+    const htime = time ? html`<div class="htime">${hero ? ICONS.clock : nothing}<span>${time}</span></div>` : nothing;
     return html`<div class="glanceview ink ${g.now ? "is-now" : soon ? "is-soon" : hero ? "is-next" : "is-free"}" title=${this._error || nothing}>
-      <div class="eyebrow"><span class="pill">${pill}</span><span class="cue">${cue}</span></div>
-      <div class="hero">${title}</div>
-      ${time ? html`<div class="htime">${hero ? html`<i style="background:${color(hero)}"></i>` : nothing}${time}</div>` : nothing}
-      ${rows.length
-        ? html`<div class="later">
-            ${rows.map((e) => html`<div class="lat"><i style="background:${color(e)}"></i><span class="gwhen">${when(e)}</span><span class="gtitle">${eventTitle(e)}</span></div>`)}
-          </div>`
-        : nothing}
+      ${state ? html`<div class="eyebrow"><span class="state">${state}</span><span class="cue">${cue}</span></div>` : nothing}
+      ${hero
+        ? html`<div class="ev big" style="--c:${color(hero)}">${mark(hero)}<div class="evtext"><div class="hero">${title}</div>${htime}</div></div>`
+        : html`<div class="hero">${title}</div>${htime}`}
+      ${rows.map(
+        (e) => html`<div class="ev lat" style="--c:${color(e)}">
+          ${mark(e)}<span class="gtitle">${eventTitle(e)}</span><span class="gwhen">${isAllDay(e) ? nothing : ICONS.clock}${when(e)}</span>
+        </div>`,
+      )}
     </div>`;
   }
 
@@ -522,12 +526,13 @@ export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
         line-height: 1.25;
       }
 
-      /* glance: a quadrant panel read from across a room (pad 0.07; eyebrow 0.14, gap 0.03, title 0.244 and time 0.15
-         of --hv-ref; then 0.04 and rows of 0.125; see GLANCE), centred when there is less to show */
+      /* glance: a quadrant panel read from across a room (pad 0.07; eyebrow 0.11, gap 0.03, the event 0.41 of
+         --hv-ref; then rows of 0.125 after 0.025; see GLANCE), centred when there is less to show. Each event is a
+         row tinted in its calendar's colour, as in the day view; the state reads in words, never in colour alone */
       .glanceview {
         height: 100%;
         box-sizing: border-box;
-        padding: calc(var(--hv-ref) * 0.07) calc(var(--hv-ref) * 0.085);
+        padding: calc(var(--hv-ref) * 0.07) calc(var(--hv-ref) * 0.07);
         display: flex;
         flex-direction: column;
         justify-content: center;
@@ -542,46 +547,104 @@ export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
       }
       .eyebrow {
         flex: none;
-        height: calc(var(--hv-ref) * 0.14);
+        height: calc(var(--hv-ref) * 0.11);
         margin-bottom: calc(var(--hv-ref) * 0.03);
+        padding-left: calc(var(--hv-ref) * 0.035);
         display: flex;
         align-items: center;
-        gap: calc(var(--hv-ref) * 0.04);
-        font-size: calc(var(--hv-ref) * 0.09);
+        gap: calc(var(--hv-ref) * 0.03);
+        font-size: calc(var(--hv-ref) * 0.088);
         font-weight: 700;
         white-space: nowrap;
       }
-      .pill {
-        flex: none;
-        height: 100%;
-        display: flex;
-        align-items: center;
-        padding: 0 calc(var(--hv-ref) * 0.05);
-        border-radius: 999px;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        font-size: calc(var(--hv-ref) * 0.075);
-        background: rgb(255 255 255 / 0.9);
-        color: #2b2520;
-        text-shadow: none;
-      }
-      /* the state reads in words; the colour only backs it up (dark ink on every fill) */
-      .is-now .pill {
-        background: #30d158;
-        color: #03240d;
-      }
-      .is-soon .pill {
-        background: #ff9f0a;
-        color: #2a1600;
-      }
       .cue {
+        font-weight: 500;
+        color: var(--hv-ink-2);
         overflow: hidden;
         text-overflow: ellipsis;
       }
+      .cue::before {
+        content: "·";
+        margin-right: calc(var(--hv-ref) * 0.03);
+      }
+      /* under way, or about to start: the time left / until is as loud as the word */
+      .is-now .cue,
+      .is-soon .cue {
+        font-weight: 700;
+        color: var(--hv-ink);
+      }
+      .ev {
+        position: relative;
+        isolation: isolate;
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: calc(var(--hv-ref) * 0.04);
+        padding: 0 calc(var(--hv-ref) * 0.045) 0 calc(var(--hv-ref) * 0.035);
+        border-radius: calc(var(--hv-ref) * 0.06);
+        box-shadow:
+          inset 0 0 0 0.5px rgb(255 255 255 / 0.35),
+          inset 1px 1px 0 rgb(255 255 255 / 0.18);
+        white-space: nowrap;
+      }
+      /* the calendar's colour as a soft wash under the row (any CSS colour; no color-mix on old WebViews) */
+      .ev::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        z-index: -1;
+        border-radius: inherit;
+        background: var(--c);
+        opacity: 0.2;
+      }
+      .ev.big {
+        height: calc(var(--hv-ref) * 0.41);
+      }
+      .is-next .ev.big::before {
+        opacity: 0.14;
+      }
+      .is-now .ev.big::before,
+      .is-soon .ev.big::before {
+        opacity: 0.32;
+      }
+      .gbar {
+        flex: none;
+        align-self: stretch;
+        width: calc(var(--hv-ref) * 0.022);
+        min-width: 3px;
+        margin: calc(var(--hv-ref) * 0.03) 0;
+        border-radius: 99px;
+        background: var(--c);
+        box-shadow: 0 0 0 0.5px rgb(255 255 255 / 0.45);
+      }
+      .big .gbar {
+        margin: calc(var(--hv-ref) * 0.055) 0;
+      }
+      .gico {
+        flex: none;
+        width: calc(var(--hv-ref) * 0.085);
+        height: calc(var(--hv-ref) * 0.085);
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--c);
+        color: #fff;
+        box-shadow: 0 0 0 0.5px rgb(255 255 255 / 0.45);
+      }
+      .gico svg {
+        width: 62%;
+        height: 62%;
+      }
+      .evtext {
+        min-width: 0;
+      }
       .hero {
         flex: none;
-        font-size: calc(var(--hv-ref) * 0.215);
-        line-height: 1.135;
+        font-size: calc(var(--hv-ref) * 0.19);
+        line-height: 1.15;
         font-weight: 700;
         letter-spacing: -0.01em;
         white-space: nowrap;
@@ -590,51 +653,44 @@ export class HomeViewCalendarCard extends HomeViewCard<CalendarConfig> {
       }
       .htime {
         flex: none;
-        font-size: calc(var(--hv-ref) * 0.125);
-        line-height: 1.2;
+        display: flex;
+        align-items: center;
+        gap: 0.3em;
+        font-size: calc(var(--hv-ref) * 0.095);
+        line-height: 1.25;
         font-weight: 500;
         white-space: nowrap;
+      }
+      .htime span {
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      .htime i,
-      .lat i {
-        display: inline-block;
+      .htime svg,
+      .gwhen svg {
         flex: none;
-        width: 0.5em;
-        height: 0.5em;
-        border-radius: 50%;
-        margin-right: 0.4em;
-        vertical-align: 0.08em;
-        box-shadow: 0 0 0 0.5px rgb(255 255 255 / 0.5);
-      }
-      .later {
-        flex: none;
-        overflow: hidden;
-        margin-top: calc(var(--hv-ref) * 0.04);
-        border-top: 0.5px solid rgb(255 255 255 / 0.35);
+        width: 0.85em;
+        height: 0.85em;
+        filter: drop-shadow(var(--hv-shadow-text));
       }
       .lat {
         height: calc(var(--hv-ref) * 0.125);
-        display: flex;
-        align-items: center;
-        gap: calc(var(--hv-ref) * 0.03);
-        font-size: calc(var(--hv-ref) * 0.08);
-        white-space: nowrap;
-      }
-      .lat i {
-        margin-right: 0;
-      }
-      .gwhen {
-        flex: none;
-        font-weight: 500;
-        color: var(--hv-ink-2);
+        margin-top: calc(var(--hv-ref) * 0.025);
+        font-size: calc(var(--hv-ref) * 0.072);
       }
       .gtitle {
+        flex: 1;
         min-width: 0;
         font-weight: 600;
         overflow: hidden;
         text-overflow: ellipsis;
+      }
+      .gwhen {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 0.3em;
+        font-weight: 500;
+        color: var(--hv-ink-2);
       }
 
       /* list: a full-page agenda on the wallpaper (edge 0.045, rows 0.227 of --hv-ref; see LIST) */

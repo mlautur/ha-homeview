@@ -739,7 +739,7 @@ result.cards = await cardsPage.evaluate(async () => {
   const all = (el, sel) => [...el.shadowRoot.querySelectorAll(sel)].map((e) => e.textContent.replace(/\s+/g, " ").trim());
   const glassy = (el) => !!el.shadowRoot.querySelector("canvas.hv-bake, .hv-glass");
   out.day = { head: all(dayCal, ".dtitle")[0], titles: all(dayCal, ".summary"), when: all(dayCal, ".when") };
-  out.glance = { pill: all(glanceCal, ".pill")[0], cue: all(glanceCal, ".cue")[0], hero: all(glanceCal, ".hero")[0], time: all(glanceCal, ".htime")[0], rows: all(glanceCal, ".gtitle"), when: all(glanceCal, ".gwhen") };
+  out.glance = { state: all(glanceCal, ".state")[0], pills: all(glanceCal, ".pill").length, marks: all(glanceCal, ".ev").map((_, i) => (glanceCal.shadowRoot.querySelectorAll(".ev")[i].querySelector(".gico") ? "icon" : glanceCal.shadowRoot.querySelectorAll(".ev")[i].querySelector(".gbar") ? "bar" : "")), cue: all(glanceCal, ".cue")[0], hero: all(glanceCal, ".hero")[0], time: all(glanceCal, ".htime")[0], rows: all(glanceCal, ".gtitle"), when: all(glanceCal, ".gwhen") };
   out.list = { titles: all(listCal, ".ltitle"), rel: all(listCal, ".rel"), today: !!listCal.shadowRoot.querySelector(".lbadge.today.hv-frost"), glassy: glassy(listCal) };
   out.page = { text: text(page), days: all(page, ".dn"), glassy: glassy(page), frost: !!page.shadowRoot.querySelector(".days.hv-frost") };
   out.digital = { time: all(digital, ".time")[0], date: all(digital, ".date")[0], glassy: glassy(digital) };
@@ -1228,9 +1228,10 @@ if (!/Golden Hour/.test(np.held.text) || !/Artist/.test(np.held.text) || /Not pl
   fail.push(`now playing: an idle player that keeps its track shows ${JSON.stringify(np.held)}, expected it paused: art, title, artist, Play and Next enabled`);
 if (c.day.head !== "Today" || c.day.titles.join() !== "Now,Holiday,Busy" || !/^Tomorrow · All day$/.test(c.day.when[1] ?? ""))
   fail.push(`calendar day: ${JSON.stringify(c.day)}, expected Today with Now, then Holiday (Tomorrow · All day) and the untitled event as Busy`);
-// glance: the timed event under way is the big one, with its time left and end; the all-day Holiday never is
-if (c.glance.pill !== "Now" || c.glance.hero !== "Now" || !/ left$/.test(c.glance.cue ?? "") || !/^Until tomorrow /.test(c.glance.time ?? "") || c.glance.rows.join() !== "Busy,Holiday" || c.glance.when[1] !== "Tomorrow")
-  fail.push(`calendar glance: ${JSON.stringify(c.glance)}, expected Now with its time left and end (tomorrow), then the untitled event as Busy and the all-day Holiday (Tomorrow)`);
+// glance: the timed event under way is the big one, with its time left and end; the all-day Holiday never is.
+// Each event is a tinted row: a bar for a timed one, a round icon for an all-day one, and no badge pills
+if (c.glance.state !== "Now" || c.glance.pills || c.glance.marks.join() !== "bar,bar,icon" || c.glance.hero !== "Now" || !/ left$/.test(c.glance.cue ?? "") || !/^Until tomorrow /.test(c.glance.time ?? "") || c.glance.rows.join() !== "Busy,Holiday" || c.glance.when[1] !== "Tomorrow")
+  fail.push(`calendar glance: ${JSON.stringify(c.glance)}, expected Now with its time left and end (tomorrow), then the untitled event as Busy and the all-day Holiday (Tomorrow), as rows with a bar, a bar and an icon and no pill`);
 if (c.list.titles.join() !== "Now,Holiday,Busy,Later" || c.list.rel.join() !== "today,tomorrow,in 2 days,in 3 days" || !c.list.today || c.list.glassy)
   fail.push(`calendar list: ${JSON.stringify(c.list)}, expected 4 rows today / tomorrow / in 2 / in 3 days, today's badge on glass and no glass card`);
 if (!/Partly Cloudy/.test(c.page.text) || !/64°/.test(c.page.text) || !/71° \/ 54° · 40% rain/.test(c.page.text) || c.page.days.join() !== "Today" || c.page.glassy || !c.page.frost)
